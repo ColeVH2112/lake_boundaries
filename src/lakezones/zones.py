@@ -41,8 +41,10 @@ def straight_run_mask(mask: np.ndarray, run_px: int, angle_step: float = 5.0) ->
             rot = canvas
         else:
             rot = ndimage.rotate(canvas, theta, reshape=False, order=0, prefilter=False)
-        eroded = ndimage.minimum_filter1d(rot, run_px, axis=1, mode="constant", cval=0)
-        opened = ndimage.maximum_filter1d(eroded, run_px, axis=1, mode="constant", cval=0)
+        # 1-D morphological opening along the row axis. grey_opening is exact for
+        # both even and odd run_px; a separate min-then-max filter pair shifts the
+        # result by one pixel at even sizes and clips one end off each run.
+        opened = ndimage.grey_opening(rot, size=(1, run_px), mode="constant", cval=0)
         if theta != 0.0:
             opened = ndimage.rotate(opened, -theta, reshape=False, order=0, prefilter=False)
         result |= opened
@@ -51,7 +53,7 @@ def straight_run_mask(mask: np.ndarray, run_px: int, angle_step: float = 5.0) ->
 
 
 def compute_zones(
-    depth_ft: np.ndarray,
+    depth_ft: np.ndarray | None,
     mask: np.ndarray,
     cell: float,
     min_depth_ft: float,
@@ -59,11 +61,18 @@ def compute_zones(
     run_length_ft: float,
     angle_step: float = 5.0,
 ) -> dict:
+    """Zone masks for the given criteria.
+
+    depth_ft may be None (geometry-only lakes) — the depth criterion is then
+    skipped and only the shore-distance + straight-run tests apply.
+    """
     dist_m = distance_from_shore_m(mask, cell)
-    with np.errstate(invalid="ignore"):
-        qualifying = mask & (depth_ft >= min_depth_ft) & (dist_m >= min_shore_dist_ft * M_PER_FT)
+    qualifying = mask & (dist_m >= min_shore_dist_ft * M_PER_FT)
+    if depth_ft is not None and min_depth_ft and min_depth_ft > 0:
+        with np.errstate(invalid="ignore"):
+            qualifying &= depth_ft >= min_depth_ft
 
     run_px = max(1, int(round(run_length_ft * M_PER_FT / cell)))
-    runs = straight_run_mask(qualifying, run_px, angle_step)
+    runs = straight_run_mask(qualifying, run_px, angle_step) if run_length_ft > 0 else qualifying.copy()
 
     return {"qualifying": qualifying, "runs": runs, "distance_m": dist_m, "run_px": run_px}

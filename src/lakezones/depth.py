@@ -15,6 +15,26 @@ from rasterio.transform import from_origin
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 
 
+def build_mask_raster(lake_poly: shapely.Geometry, cell: float = 10.0, margin_cells: int = 4):
+    """Rasterize a lake polygon to a boolean water mask + affine transform.
+
+    Depth-free: this is all the geometry-only pipeline (distance from shore,
+    straight runs) needs, so any lake with just an outline can be analyzed.
+    """
+    minx, miny, maxx, maxy = lake_poly.bounds
+    minx = np.floor(minx / cell) * cell - margin_cells * cell
+    miny = np.floor(miny / cell) * cell - margin_cells * cell
+    maxx = np.ceil(maxx / cell) * cell + margin_cells * cell
+    maxy = np.ceil(maxy / cell) * cell + margin_cells * cell
+    width = int(round((maxx - minx) / cell))
+    height = int(round((maxy - miny) / cell))
+    transform = from_origin(minx, maxy, cell, cell)
+    mask = features.geometry_mask(
+        [lake_poly], out_shape=(height, width), transform=transform, invert=True
+    )
+    return mask, transform
+
+
 def _ring_points(poly: shapely.Geometry, densify: float) -> np.ndarray:
     pts = []
     for part in getattr(poly, "geoms", [poly]):
@@ -38,19 +58,8 @@ def build_depth_raster(
     so river contours from the basin-wide dataset don't leak in.
     """
     densify = densify or cell
-
-    minx, miny, maxx, maxy = lake_poly.bounds
-    minx = np.floor(minx / cell) * cell - margin_cells * cell
-    miny = np.floor(miny / cell) * cell - margin_cells * cell
-    maxx = np.ceil(maxx / cell) * cell + margin_cells * cell
-    maxy = np.ceil(maxy / cell) * cell + margin_cells * cell
-    width = int(round((maxx - minx) / cell))
-    height = int(round((maxy - miny) / cell))
-    transform = from_origin(minx, maxy, cell, cell)
-
-    mask = features.geometry_mask(
-        [lake_poly], out_shape=(height, width), transform=transform, invert=True
-    )
+    mask, transform = build_mask_raster(lake_poly, cell, margin_cells)
+    minx, maxy = transform.c, transform.f
 
     near = contours.iloc[
         contours.sindex.query(lake_poly, predicate="intersects")

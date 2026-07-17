@@ -42,30 +42,40 @@ def cmd_list_lakes(_args) -> int:
     return 0
 
 
-def _run_one(lake_name: str, wb, contours, args) -> dict | None:
+def _resolve_polygon(lake_name, wb, contours, args):
+    from .data import get_lake_polygon, polygon_from_file
+
+    if getattr(args, "polygon", None):
+        return polygon_from_file(args.polygon)
+    return get_lake_polygon(
+        wb, lake_name, contours=contours,
+        dissolve_touching=lake_name in DISSOLVE_TOUCHING,
+    )
+
+
+def _run_one(lake_name: str, wb, contours, args) -> dict:
     import rasterio
 
-    from .data import get_lake_polygon
-    from .depth import build_depth_raster
+    from . import depth_sources
     from .vectorize import mask_to_gdf, save_geojson
     from .zones import compute_zones
 
     slug = slugify(lake_name)
     outdir = OUT_DIR / slug
-    outdir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
     try:
-        poly = get_lake_polygon(
-            wb, lake_name, contours=contours,
-            dissolve_touching=lake_name in DISSOLVE_TOUCHING,
-        )
-        depth, mask, transform = build_depth_raster(
-            poly, contours, cell=args.cell, densify=args.densify
+        poly = _resolve_polygon(lake_name, wb, contours, args)
+        depth, mask, transform = depth_sources.resolve(
+            args.depth_source, poly, contours=contours, path=args.depth_file,
+            depth_field=args.depth_field, cell=args.cell, densify=args.densify,
         )
     except (KeyError, ValueError) as e:
         print(f"[{lake_name}] SKIP: {e}")
-        return None
+        return {"lake": lake_name, "skipped": str(e)}
+
+    outdir.mkdir(parents=True, exist_ok=True)
+    has_depth = depth is not None
     z = compute_zones(
         depth, mask, args.cell,
         min_depth_ft=args.min_depth_ft,
@@ -74,20 +84,29 @@ def _run_one(lake_name: str, wb, contours, args) -> dict | None:
         angle_step=args.angle_step,
     )
 
-    with rasterio.open(
-        outdir / f"depth_ft_{int(args.cell)}m.tif", "w",
-        driver="GTiff", height=depth.shape[0], width=depth.shape[1],
-        count=1, dtype="float32", crs=CRS_UTM, transform=transform,
-        nodata=np.nan, compress="deflate",
-    ) as dst:
-        dst.write(depth, 1)
+    def _save_tif(name, arr):
+        with rasterio.open(
+            outdir / name, "w", driver="GTiff",
+            height=arr.shape[0], width=arr.shape[1], count=1, dtype="float32",
+            crs=CRS_UTM, transform=transform, nodata=np.nan, compress="deflate",
+        ) as dst:
+            dst.write(arr.astype("float32"), 1)
+
+    cellstr = f"{int(args.cell)}m"
+    # distance-from-shore raster is always written (the primary geometry layer +
+    # what the interactive site sliders read); depth only when a source gave it
+    dist_out = np.where(mask, z["distance_m"], np.nan)
+    _save_tif(f"distance_m_{cellstr}.tif", dist_out)
+    if has_depth:
+        _save_tif(f"depth_ft_{cellstr}.tif", depth)
 
     criteria = dict(
-        min_depth_ft=args.min_depth_ft,
+        min_depth_ft=args.min_depth_ft if has_depth else 0.0,
         min_shore_dist_ft=args.min_shore_dist_ft,
         run_length_ft=args.run_length_ft,
         angle_step_deg=args.angle_step,
         cell_m=args.cell,
+        depth_source=args.depth_source if has_depth else "none",
     )
     gdf_q = mask_to_gdf(z["qualifying"], transform, lake=lake_name, layer="qualifying", **criteria)
     gdf_r = mask_to_gdf(z["runs"], transform, lake=lake_name, layer="runs", **criteria)
@@ -98,17 +117,19 @@ def _run_one(lake_name: str, wb, contours, args) -> dict | None:
     stats = {
         "lake": lake_name,
         "criteria": criteria,
+        "has_depth": has_depth,
         "lake_area_acres": round(float(mask.sum()) * cell_acres, 1),
-        "max_depth_ft": round(float(np.nanmax(depth)), 1) if mask.any() else 0.0,
+        "max_depth_ft": round(float(np.nanmax(depth)), 1) if has_depth and mask.any() else None,
         "qualifying_acres": round(float(z["qualifying"].sum()) * cell_acres, 1),
         "runs_acres": round(float(z["runs"].sum()) * cell_acres, 1),
         "runs_polygons": int(len(gdf_r)),
         "seconds": round(time.time() - t0, 1),
     }
     (outdir / "stats.json").write_text(json.dumps(stats, indent=2))
+    depth_str = f"max {stats['max_depth_ft']:.0f} ft" if has_depth else "geometry-only (no depth)"
     print(
-        f"[{lake_name}] {stats['lake_area_acres']:,.0f} ac lake, "
-        f"max {stats['max_depth_ft']:.0f} ft | qualifying {stats['qualifying_acres']:,.0f} ac | "
+        f"[{lake_name}] {stats['lake_area_acres']:,.0f} ac lake, {depth_str} | "
+        f"qualifying {stats['qualifying_acres']:,.0f} ac | "
         f"with {args.run_length_ft:.0f} ft runs {stats['runs_acres']:,.0f} ac "
         f"({stats['runs_polygons']} zones) [{stats['seconds']}s]"
     )
@@ -116,30 +137,57 @@ def _run_one(lake_name: str, wb, contours, args) -> dict | None:
 
 
 def cmd_run(args) -> int:
-    wb, contours = _load_inputs()
+    needs_nhd = not getattr(args, "polygon", None)
+    needs_contours = args.depth_source == "contours"
+    wb, contours = _load_inputs() if (needs_nhd or needs_contours) else (None, None)
     names = COVERED_LAKES if args.all_covered else [args.lake]
     if not names or names == [None]:
         print("error: pass --lake NAME or --all-covered", file=sys.stderr)
         return 2
-    all_stats = [s for n in names if (s := _run_one(n, wb, contours, args))]
+    all_stats = [_run_one(n, wb, contours, args) for n in names if n is not None]
     (OUT_DIR / "summary.json").write_text(json.dumps(all_stats, indent=2))
-    print(f"\nwrote {OUT_DIR / 'summary.json'}")
+    ran = [s for s in all_stats if "skipped" not in s]
+    print(f"\n{len(ran)}/{len(all_stats)} lakes analyzed → {OUT_DIR / 'summary.json'}")
     return 0
+
+
+def _criteria_label(crit: dict) -> str:
+    depth = crit.get("min_depth_ft", 0)
+    depth_part = f"depth ≥ {depth:.0f} ft · " if depth and depth > 0 else ""
+    return (
+        f"{depth_part}≥ {crit.get('min_shore_dist_ft', 0):.0f} ft from shore · "
+        f"straight run ≥ {crit.get('run_length_ft', 0):.0f} ft"
+    )
 
 
 def cmd_render(args) -> int:
     from .render import render_lake
 
     names = COVERED_LAKES if args.all_covered else [args.lake]
-    label = (
-        f"depth ≥ {args.min_depth_ft:.0f} ft · ≥ {args.min_shore_dist_ft:.0f} ft from shore · "
-        f"straight run ≥ {args.run_length_ft:.0f} ft"
-    )
     for n in names:
         if n is None:
             continue
-        out = render_lake(slugify(n), n, label)
+        slug = slugify(n)
+        # label from the criteria actually recorded by `run`, not render's own
+        # defaults — otherwise a custom run gets mislabeled maps
+        stats_path = OUT_DIR / slug / "stats.json"
+        if stats_path.exists():
+            crit = json.loads(stats_path.read_text()).get("criteria", {})
+        else:
+            crit = dict(
+                min_depth_ft=args.min_depth_ft,
+                min_shore_dist_ft=args.min_shore_dist_ft,
+                run_length_ft=args.run_length_ft,
+            )
+        out = render_lake(slug, n, _criteria_label(crit))
         print(f"[{n}] {'wrote ' + str(out) if out else 'no outputs to render'}")
+    return 0
+
+
+def cmd_web_export(_args) -> int:
+    from .web_export import export_all
+
+    export_all()
     return 0
 
 
@@ -157,9 +205,14 @@ def main(argv=None) -> int:
 
     sub.add_parser("list-lakes", help="show NHD waterbodies covered by the bathymetry")
 
-    pr = sub.add_parser("run", help="compute zones for one or all covered lakes")
-    pr.add_argument("--lake")
-    pr.add_argument("--all-covered", action="store_true")
+    pr = sub.add_parser("run", help="compute zones for one or all lakes")
+    pr.add_argument("--lake", help="lake name (any NHD waterbody) or label for --polygon")
+    pr.add_argument("--all-covered", action="store_true", help="all lakes with tribal bathymetry")
+    pr.add_argument("--polygon", help="path to an outline file (any CRS) — for lakes outside the NHD tiles")
+    pr.add_argument("--depth-source", choices=["contours", "contour-file", "raster", "none"],
+                    default="contours", help="where depth comes from ('none' = geometry-only)")
+    pr.add_argument("--depth-file", help="path for --depth-source contour-file/raster")
+    pr.add_argument("--depth-field", default="depth_ft", help="depth attribute in a contour-file")
     pr.add_argument("--min-depth-ft", type=float, default=20.0)
     pr.add_argument("--min-shore-dist-ft", type=float, default=500.0)
     pr.add_argument("--run-length-ft", type=float, default=3000.0)
@@ -174,6 +227,8 @@ def main(argv=None) -> int:
     pm.add_argument("--min-shore-dist-ft", type=float, default=500.0)
     pm.add_argument("--run-length-ft", type=float, default=3000.0)
 
+    sub.add_parser("web-export", help="pack rasters into docs/data for the web app")
+
     pv = sub.add_parser("validate-20ft", help="compare our 20 ft contour to Idaho DEQ's")
     pv.add_argument("--cell", type=float, default=10.0)
     pv.add_argument("--densify", type=float, default=None)
@@ -183,5 +238,6 @@ def main(argv=None) -> int:
         "list-lakes": cmd_list_lakes,
         "run": cmd_run,
         "render": cmd_render,
+        "web-export": cmd_web_export,
         "validate-20ft": cmd_validate_20ft,
     }[args.cmd](args)

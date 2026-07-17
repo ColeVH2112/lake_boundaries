@@ -5,12 +5,14 @@
     "min_shore_dist_ft": 500.0,
     "run_length_ft": 3000.0,
     "angle_step_deg": 5.0,
-    "cell_m": 10.0
+    "cell_m": 10.0,
+    "depth_source": "contours"
   },
+  "has_depth": true,
   "lake_area_acres": 394.8,
   "max_depth_ft": 25.0,
   "qualifying_acres": 24.8,
   "runs_acres": 0.0,
   "runs_polygons": 0,
-  "seconds": 0.4
+  "seconds": 0.5
 }

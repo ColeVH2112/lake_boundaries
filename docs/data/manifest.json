@@ -1,0 +1,79 @@
+[
+  {
+    "slug": "coeur_dalene_lake",
+    "name": "Coeur d'Alene Lake",
+    "has_depth": true,
+    "lake_area_acres": 31072.3,
+    "max_depth_ft": 204.0
+  },
+  {
+    "slug": "cave_lake",
+    "name": "Cave Lake",
+    "has_depth": true,
+    "lake_area_acres": 759.8,
+    "max_depth_ft": 15.0
+  },
+  {
+    "slug": "swan_lake",
+    "name": "Swan Lake",
+    "has_depth": true,
+    "lake_area_acres": 668.9,
+    "max_depth_ft": 20.0
+  },
+  {
+    "slug": "anderson_lake",
+    "name": "Anderson Lake",
+    "has_depth": true,
+    "lake_area_acres": 502.3,
+    "max_depth_ft": 15.0
+  },
+  {
+    "slug": "killarney_lake",
+    "name": "Killarney Lake",
+    "has_depth": true,
+    "lake_area_acres": 501.0,
+    "max_depth_ft": 15.0
+  },
+  {
+    "slug": "thompson_lake",
+    "name": "Thompson Lake",
+    "has_depth": true,
+    "lake_area_acres": 394.8,
+    "max_depth_ft": 25.0
+  },
+  {
+    "slug": "black_lake",
+    "name": "Black Lake",
+    "has_depth": true,
+    "lake_area_acres": 379.9,
+    "max_depth_ft": 25.0
+  },
+  {
+    "slug": "rose_lake",
+    "name": "Rose Lake",
+    "has_depth": true,
+    "lake_area_acres": 353.2,
+    "max_depth_ft": 20.0
+  },
+  {
+    "slug": "blue_lake",
+    "name": "Blue Lake",
+    "has_depth": true,
+    "lake_area_acres": 348.6,
+    "max_depth_ft": 30.0
+  },
+  {
+    "slug": "medicine_lake",
+    "name": "Medicine Lake",
+    "has_depth": true,
+    "lake_area_acres": 203.6,
+    "max_depth_ft": 15.0
+  },
+  {
+    "slug": "lake_hayden",
+    "name": "Lake Hayden",
+    "has_depth": false,
+    "lake_area_acres": 3854.1,
+    "max_depth_ft": null
+  }
+]

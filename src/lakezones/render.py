@@ -25,11 +25,14 @@ TEXT = "#0b0b0b"
 
 def render_lake(slug: str, title: str, criteria_label: str) -> Path | None:
     outdir = OUT_DIR / slug
-    tifs = sorted(outdir.glob("depth_ft_*.tif"))
-    if not tifs:
+    depth_tifs = sorted(outdir.glob("depth_ft_*.tif"))
+    dist_tifs = sorted(outdir.glob("distance_m_*.tif"))
+    has_depth = bool(depth_tifs)
+    basemap_tifs = depth_tifs if has_depth else dist_tifs
+    if not basemap_tifs:
         return None
-    with rasterio.open(tifs[0]) as src:
-        depth = src.read(1)
+    with rasterio.open(basemap_tifs[0]) as src:
+        field = src.read(1)
         b = src.bounds
 
     fig_w = 9.0
@@ -38,15 +41,20 @@ def render_lake(slug: str, title: str, criteria_label: str) -> Path | None:
     ax.set_facecolor(LAND)
 
     extent = (b.left, b.right, b.bottom, b.top)
-    masked = np.ma.masked_invalid(depth)
-    im = ax.imshow(masked, cmap="Blues", extent=extent, origin="upper",
+    masked = np.ma.masked_invalid(field)
+    # depth: shade by depth; geometry-only: shade by distance-from-shore (ft)
+    if not has_depth:
+        masked = masked / 0.3048  # metres → feet for a familiar scale
+    cmap = "Blues" if has_depth else "GnBu"
+    im = ax.imshow(masked, cmap=cmap, extent=extent, origin="upper",
                    vmin=0, vmax=max(10.0, float(masked.max())), zorder=1)
-    ax.contour(masked.filled(0) > 0, levels=[0.5], colors=[SHORE],
+    ax.contour(np.isfinite(field).astype(float), levels=[0.5], colors=[SHORE],
                linewidths=0.6, extent=extent, origin="upper", zorder=2)
 
+    qual_label = "qualifying (depth + shore distance)" if has_depth else "qualifying (shore distance)"
     handles = []
     for name, path, color, alpha, hatch in [
-        ("qualifying (depth + shore distance)", outdir / "zones_qualifying.geojson", QUALIFYING, 0.45, None),
+        (qual_label, outdir / "zones_qualifying.geojson", QUALIFYING, 0.45, None),
         ("supports straight run", outdir / "zones_runs.geojson", RUNS, 0.55, "//"),
     ]:
         if path.exists():
@@ -66,7 +74,8 @@ def render_lake(slug: str, title: str, criteria_label: str) -> Path | None:
                 xytext=(0, 5), ha="center", fontsize=8, color=TEXT)
 
     cbar = fig.colorbar(im, ax=ax, shrink=0.6, pad=0.02)
-    cbar.set_label("depth (ft below 2,128 ft full pool)", fontsize=8)
+    cbar.set_label("depth (ft below 2,128 ft full pool)" if has_depth
+                   else "distance from shore (ft)", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
 
     ax.legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.9)

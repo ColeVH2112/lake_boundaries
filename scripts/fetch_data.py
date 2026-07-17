@@ -91,8 +91,15 @@ def unzip_all() -> None:
         if mark.exists():
             continue
         print(f"[unzip] {z.relative_to(RAW)}")
-        with zipfile.ZipFile(z) as zf:
-            zf.extractall(z.parent)
+        try:
+            with zipfile.ZipFile(z) as zf:
+                zf.extractall(z.parent)
+        except zipfile.BadZipFile:
+            # a truncated download or an HTML error page saved as .zip — drop it
+            # and keep going so one bad archive can't abort the rest
+            print(f"[BAD ] {z.relative_to(RAW)} is not a valid zip; deleting", file=sys.stderr)
+            z.unlink()
+            continue
         mark.touch()
 
 

@@ -73,6 +73,16 @@ def load_waterbodies(huc8s: list[str] | None = None) -> gpd.GeoDataFrame:
     return wb
 
 
+def polygon_from_file(path: str) -> shapely.Geometry:
+    """Load an arbitrary lake outline (any OGR format) as one dissolved geometry.
+
+    Lets the tool run on lakes outside the bundled NHD tiles — supply an NHD
+    export, an OSM `natural=water` polygon, or a hand-drawn outline in any CRS.
+    """
+    gdf = gpd.read_file(path).to_crs(CRS_UTM)
+    return shapely.unary_union(shapely.force_2d(gdf.geometry).values)
+
+
 def get_lake_polygon(
     wb: gpd.GeoDataFrame,
     name: str,

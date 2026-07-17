@@ -25,7 +25,38 @@ python3 -m venv .venv
 .venv/bin/python -m lakezones run --lake "Coeur d'Alene Lake" \
     --min-depth-ft 30 --min-shore-dist-ft 1000 --run-length-ft 5000
 .venv/bin/python -m lakezones validate-20ft     # cross-check vs Idaho DEQ contour
+.venv/bin/python -m lakezones web-export        # rebuild the interactive site data
 ```
+
+### Works on any lake (portable)
+
+Depth is optional — distance-from-shore and the straight-run test need only an
+outline, so **any** lake can be analyzed:
+
+```bash
+# geometry only (no depth data needed) — e.g. Hayden Lake
+python -m lakezones run --lake "Lake Hayden" --depth-source none
+
+# a lake outside the bundled NHD tiles: supply any outline file (any CRS)
+python -m lakezones run --lake "My Lake" --polygon my_lake.geojson --depth-source none
+
+# bring your own depth: a contour file with a depth field, or a depth GeoTIFF
+python -m lakezones run --lake "My Lake" --polygon my_lake.geojson \
+    --depth-source contour-file --depth-file contours.geojson --depth-field DEPTH_FT
+python -m lakezones run --lake "My Lake" --polygon my_lake.geojson \
+    --depth-source raster --depth-file sonar_depth.tif
+```
+
+`--depth-source` is `contours` (bundled tribal data), `contour-file`, `raster`,
+or `none`. When a depth source doesn't cover a lake it falls back to
+geometry-only rather than failing.
+
+### Interactive explorer
+
+`docs/` is a static site (no build step, no server) that loads the exported
+rasters and recomputes zones live as you drag the depth / distance / run-length
+sliders. Enable **GitHub Pages → Deploy from branch → `main` / `docs`** and it
+publishes itself. Run it locally with `python -m http.server -d docs`.
 
 Outputs land in `out/<lake_slug>/`:
 
@@ -54,6 +85,17 @@ Outputs land in `out/<lake_slug>/`:
    This is the right test for "can a 3,000 ft straight lane fit here".
 
 Everything is deterministic; no ML, no manual digitizing for covered lakes.
+
+### Digitizing a scanned / nautical map (`lakezones.digitize`)
+
+For lakes whose only depth information is a paper or scanned map, `digitize.py`
+georeferences the image (`affine_from_gcps` from a few control points) and turns
+color-isolated contour lines into the same `depth_ft` contour layer the rest of
+the pipeline consumes — so a digitized map and native bathymetry run identically.
+`scripts/validate_digitize.py` proves the round-trip on real data: rendering a
+lake's true contours into a synthetic scan and digitizing them back reproduces
+the depth raster to **RMSE 0.23 ft / median 0.02 ft**, far below the 5-ft
+contour interval. The error that matters is the source survey's, not the tracing.
 
 ## Accuracy
 

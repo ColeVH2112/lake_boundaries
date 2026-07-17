@@ -20,7 +20,9 @@ COVERED_LAKES = [
     "Anderson Lake",
     "Thompson Lake",
     "Swan Lake",
-    "Bull Run Lake",
+    # "Bull Run Lake" has tribal contours (to only 10 ft) but no NHD waterbody
+    # polygon under that GNIS name, so there's no outline to analyze against.
+    # Supply one with `run --lake "Bull Run Lake" --polygon bull_run.geojson`.
 ]
 
 
