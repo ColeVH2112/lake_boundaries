@@ -74,6 +74,17 @@ def _run_one(lake_name: str, wb, contours, args) -> dict:
         print(f"[{lake_name}] SKIP: {e}")
         return {"lake": lake_name, "skipped": str(e)}
 
+    # fold docks into the shoreline: dock cells become non-water, so distance is
+    # measured from shore-or-dock (Idaho's setback rule counts docks & floats)
+    n_docks = 0
+    if getattr(args, "docks", None):
+        from .docks import burn_docks, load_dock_file
+        dk = load_dock_file(args.docks)
+        n_docks = len(dk)
+        mask = burn_docks(mask, dk.geometry.values, transform, width_m=args.dock_width_m)
+        if depth is not None:
+            depth = np.where(mask, depth, np.nan)
+
     outdir.mkdir(parents=True, exist_ok=True)
     has_depth = depth is not None
     z = compute_zones(
@@ -107,6 +118,7 @@ def _run_one(lake_name: str, wb, contours, args) -> dict:
         angle_step_deg=args.angle_step,
         cell_m=args.cell,
         depth_source=args.depth_source if has_depth else "none",
+        docks=n_docks,
     )
     gdf_q = mask_to_gdf(z["qualifying"], transform, lake=lake_name, layer="qualifying", **criteria)
     gdf_r = mask_to_gdf(z["runs"], transform, lake=lake_name, layer="runs", **criteria)
@@ -219,6 +231,8 @@ def main(argv=None) -> int:
     pr.add_argument("--angle-step", type=float, default=5.0)
     pr.add_argument("--cell", type=float, default=10.0)
     pr.add_argument("--densify", type=float, default=None)
+    pr.add_argument("--docks", help="dock geometry file (points/lines) to treat as shore")
+    pr.add_argument("--dock-width-m", type=float, default=4.0, help="rasterized dock width")
 
     pm = sub.add_parser("render", help="render map PNGs from existing outputs")
     pm.add_argument("--lake")
