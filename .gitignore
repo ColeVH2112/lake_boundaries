@@ -19,3 +19,7 @@ data/interim/
 .idea/
 out/**/*_basemap.jpg
 data/interim/
+
+# large cached imagery tiles (regenerable)
+data/docks/_tiles/
+data/docks/*_basemap.jpg

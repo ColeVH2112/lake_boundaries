@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import time
 import urllib.request
 from pathlib import Path
 
@@ -39,12 +40,24 @@ TILE_M = 1600      # tile span in metres
 TILE_PX = 2048     # ~0.8 m/px
 
 
-def fetch_tile(bbox, cache: Path):
-    if not (cache.exists() and cache.stat().st_size > 10000):
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        h = int(round(TILE_PX * (bbox[3] - bbox[1]) / (bbox[2] - bbox[0])))
-        urllib.request.urlretrieve(EXPORT.format(*bbox, TILE_PX, h), cache)
-    return mpimg.imread(cache)
+def fetch_tile(bbox, cache: Path, retries: int = 5):
+    """Fetch a tile with retries; returns the image or None if it keeps failing
+    (the imagery server 504s intermittently — skip that tile rather than abort)."""
+    if cache.exists() and cache.stat().st_size > 10000:
+        return mpimg.imread(cache)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    h = int(round(TILE_PX * (bbox[3] - bbox[1]) / (bbox[2] - bbox[0])))
+    url = EXPORT.format(*bbox, TILE_PX, h)
+    for attempt in range(retries):
+        try:
+            urllib.request.urlretrieve(url, cache)
+            if cache.stat().st_size > 10000:
+                return mpimg.imread(cache)
+        except Exception:  # noqa: BLE001 - transient server errors
+            pass
+        time.sleep(2 * (attempt + 1))
+    print(f"  ! tile fetch failed after {retries} tries, skipping {bbox}")
+    return None
 
 
 def main():
@@ -72,6 +85,8 @@ def main():
             if clip.is_empty:
                 continue
             img = fetch_tile(bbox, tmp / f"t_{i}_{j}.jpg")
+            if img is None:
+                continue
             th, tw = img.shape[:2]
             tf = from_bounds(*bbox, tw, th)
             wmask = features.geometry_mask([poly], (th, tw), tf, invert=True)

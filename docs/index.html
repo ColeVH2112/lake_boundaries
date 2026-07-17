@@ -139,6 +139,11 @@
             <span class="u">ft</span></span></span>
           <input type="range" id="run" min="0" max="6000" step="50" value="3000" />
         </label>
+        <label class="row" style="flex-direction:row; align-items:center; gap:.55rem; margin-top:1rem;">
+          <input type="checkbox" id="docks" style="width:1.1rem; height:1.1rem; accent-color:var(--accent);" />
+          <span class="lab" style="display:block"><span>measure from docks too</span>
+            <span class="muted" id="dockNote" style="display:block; font-size:.72rem;"></span></span>
+        </label>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.9rem;">
           <button class="preset" data-d="300" data-z="0" data-r="0">Idaho no-wake (300 ft)</button>
           <button class="preset" data-d="500" data-z="0" data-r="0">500 ft from shore</button>
@@ -165,7 +170,8 @@ const FT = 0.3048;
 const SENT = -32768;
 const el = id => document.getElementById(id);
 let LAKE = null;                 // decoded lake payload
-let DIST = null, DEPTH = null, MASK = null;  // Int16Array / Uint8Array
+let DIST = null, DIST_DOCKS = null, DEPTH = null, MASK = null;  // Int16Array / Uint8Array
+function curDist(){ return (el('docks').checked && DIST_DOCKS) ? DIST_DOCKS : DIST; }
 let runTimer = null;
 
 function b64ToI16(b64){
@@ -244,9 +250,10 @@ function compute(){
 
   const qual=new Uint8Array(N);
   const distThresh = distFt*FT;
+  const D = curDist();
   for(let i=0;i<N;i++){
     if(!MASK[i]) continue;
-    if(DIST[i]*1 < distThresh) continue;
+    if(D[i]*1 < distThresh) continue;
     if(LAKE.has_depth && depthFt>0 && DEPTH[i] < depthFt) continue;
     qual[i]=1;
   }
@@ -276,12 +283,13 @@ function paint(qual, runs){
   if(!IMG || IMG.width!==w) IMG=ctx.createImageData(w,h);
   const px=IMG.data;
   const maxDepth=LAKE.max_depth_ft||60;
-  let maxDist=0; for(let i=0;i<DIST.length;i++) if(MASK[i] && DIST[i]>maxDist) maxDist=DIST[i];
+  const D = curDist();
+  let maxDist=0; for(let i=0;i<D.length;i++) if(MASK[i] && D[i]>maxDist) maxDist=D[i];
   const maxDistFt=maxDist/FT;
   for(let i=0;i<w*h;i++){
     const o=i*4;
     if(!MASK[i]){ px[o]=0;px[o+1]=0;px[o+2]=0;px[o+3]=0; continue; }
-    let c = LAKE.has_depth ? rampDepth(DEPTH[i], maxDepth) : rampDist(DIST[i]/FT, maxDistFt);
+    let c = LAKE.has_depth ? rampDepth(DEPTH[i], maxDepth) : rampDist(D[i]/FT, maxDistFt);
     if(qual && qual[i]){ c=[mix(c[0],200),mix(c[1],134),mix(c[2],10)]; }        // amber wash
     if(runs && runs[i]){ c=[mix(c[0],197),mix(c[1],67),mix(c[2],63)]; }         // red wash
     px[o]=c[0]; px[o+1]=c[1]; px[o+2]=c[2]; px[o+3]=255;
@@ -298,6 +306,13 @@ async function loadLake(slug){
   MASK = new Uint8Array(DIST.length);
   for(let i=0;i<DIST.length;i++) MASK[i] = DIST[i]!==SENT ? 1 : 0;
   DEPTH = LAKE.has_depth ? b64ToI16(LAKE.depth_ft) : null;
+  DIST_DOCKS = LAKE.dist_m_docks ? b64ToI16(LAKE.dist_m_docks) : null;
+  const dockOn = !!DIST_DOCKS;
+  el('docks').disabled = !dockOn;
+  if(!dockOn) el('docks').checked = false;
+  el('dockNote').textContent = dockOn
+    ? `${LAKE.n_docks||''} docks detected from imagery, folded into the shoreline`
+    : 'no dock layer for this lake yet';
 
   // size the distance / run controls to this lake's actual geometry
   let maxDist=0; for(let i=0;i<DIST.length;i++) if(MASK[i] && DIST[i]>maxDist) maxDist=DIST[i];
@@ -343,6 +358,7 @@ async function init(){
       v=Math.max(+n.min, Math.min(+n.max, v)); n.value=v;
       r.value=Math.max(+r.min, Math.min(+r.max, v)); compute(); });
   });
+  el('docks').addEventListener('change', compute);
   document.querySelectorAll('button.preset').forEach(b=> b.onclick=()=>{
     setPair('dist','distNum',+b.dataset.d); setPair('depth','depthNum',+b.dataset.z);
     setPair('run','runNum',+b.dataset.r); compute();

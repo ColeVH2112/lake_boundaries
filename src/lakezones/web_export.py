@@ -13,16 +13,46 @@ import json
 import math
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import rasterio
 
-from .config import ACRES_PER_M2, OUT_DIR, PROJECT_ROOT
+from .config import ACRES_PER_M2, CRS_UTM, OUT_DIR, PROJECT_ROOT
 from .lakes import slugify
 
 DOCS = PROJECT_ROOT / "docs"
 WEB_DATA = DOCS / "data"
+DOCKS_DIR = PROJECT_ROOT / "data" / "docks"
 SENTINEL = -32768
 TARGET_MAX_PX = 600
+
+
+def _dedupe_points(gdf: gpd.GeoDataFrame, radius_m: float = 12.0) -> gpd.GeoDataFrame:
+    """Greedy spatial de-dup: collapse multiple detections of one physical dock."""
+    pts = [g for g in gdf.geometry if g.geom_type == "Point"]
+    kept = []
+    for p in sorted(pts, key=lambda g: (g.x, g.y)):
+        if all(p.distance(k) > radius_m for k in kept):
+            kept.append(p)
+    return gpd.GeoDataFrame(geometry=kept, crs=gdf.crs)
+
+
+def _dock_field(name, wb, native_cell, factor, hh, ww):
+    """Dock-aware distance field: distance from shore-or-dock, aligned to the
+    lake's exported grid. Returns (packed Int16 base64, deduped dock count)."""
+    from .data import get_lake_polygon
+    from .depth import build_mask_raster
+    from .docks import burn_docks
+    from .zones import distance_from_shore_m
+
+    slug = slugify(name)
+    poly = get_lake_polygon(wb, name)
+    mask, tr = build_mask_raster(poly, native_cell)
+    docks = _dedupe_points(gpd.read_file(DOCKS_DIR / f"{slug}_cv.geojson").to_crs(CRS_UTM))
+    mask_d = burn_docks(mask, docks.geometry.values, tr, width_m=6.0)
+    arr = np.where(mask, distance_from_shore_m(mask_d, native_cell), np.nan)
+    ds = _downsample(arr, factor)[:hh, :ww]
+    return _pack_int16(ds), len(docks)
 
 
 def _downsample(arr: np.ndarray, factor: int) -> np.ndarray:
@@ -43,7 +73,7 @@ def _pack_int16(arr: np.ndarray) -> str:
     return base64.b64encode(out.astype("<i2").tobytes()).decode("ascii")
 
 
-def export_lake(slug: str) -> dict | None:
+def export_lake(slug: str, wb=None) -> dict | None:
     outdir = OUT_DIR / slug
     stats_path = outdir / "stats.json"
     dist_tifs = sorted(outdir.glob("distance_m_*.tif"))
@@ -90,19 +120,34 @@ def export_lake(slug: str) -> dict | None:
         "dist_m": _pack_int16(dist_ds),
         "depth_ft": depth_b64,
     }
+
+    has_docks = False
+    n_docks = 0
+    if wb is not None and (DOCKS_DIR / f"{slug}_cv.geojson").exists():
+        payload["dist_m_docks"], n_docks = _dock_field(
+            stats["lake"], wb, native_cell, factor, hh, ww
+        )
+        payload["has_docks"] = True
+        payload["n_docks"] = n_docks
+        has_docks = True
+
     WEB_DATA.mkdir(parents=True, exist_ok=True)
     (WEB_DATA / f"{slug}.json").write_text(json.dumps(payload))
     kb = len((WEB_DATA / f"{slug}.json").read_text()) // 1024
-    print(f"[web] {stats['lake']:<24} {ww}x{hh} @ {web_cell:.0f} m  "
-          f"{'depth+dist' if has_depth else 'dist only'}  ({kb} KB)")
+    tag = ("depth+dist" if has_depth else "dist only") + (f" +{n_docks} docks" if has_docks else "")
+    print(f"[web] {stats['lake']:<24} {ww}x{hh} @ {web_cell:.0f} m  {tag}  ({kb} KB)")
     return {"slug": slug, "name": stats["lake"], "has_depth": has_depth,
+            "has_docks": has_docks,
             "lake_area_acres": stats.get("lake_area_acres"),
             "max_depth_ft": payload["max_depth_ft"]}
 
 
 def export_all() -> None:
+    from .data import load_waterbodies
+
     slugs = sorted(p.name for p in OUT_DIR.iterdir() if p.is_dir())
-    manifest = [m for s in slugs if (m := export_lake(s))]
+    wb = load_waterbodies() if any(DOCKS_DIR.glob("*_cv.geojson")) else None
+    manifest = [m for s in slugs if (m := export_lake(s, wb))]
     # depth lakes first, then by area
     manifest.sort(key=lambda m: (not m["has_depth"], -(m["lake_area_acres"] or 0)))
     WEB_DATA.mkdir(parents=True, exist_ok=True)
