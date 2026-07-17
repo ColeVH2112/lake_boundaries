@@ -1,0 +1,16 @@
+{
+  "lake": "Coeur d'Alene Lake",
+  "criteria": {
+    "min_depth_ft": 20.0,
+    "min_shore_dist_ft": 500.0,
+    "run_length_ft": 3000.0,
+    "angle_step_deg": 5.0,
+    "cell_m": 10.0
+  },
+  "lake_area_acres": 31072.3,
+  "max_depth_ft": 210.0,
+  "qualifying_acres": 20703.6,
+  "runs_acres": 20643.2,
+  "runs_polygons": 3,
+  "seconds": 64.0
+}

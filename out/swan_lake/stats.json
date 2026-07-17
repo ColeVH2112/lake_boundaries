@@ -1,0 +1,16 @@
+{
+  "lake": "Swan Lake",
+  "criteria": {
+    "min_depth_ft": 20.0,
+    "min_shore_dist_ft": 500.0,
+    "run_length_ft": 3000.0,
+    "angle_step_deg": 5.0,
+    "cell_m": 10.0
+  },
+  "lake_area_acres": 668.9,
+  "max_depth_ft": 20.0,
+  "qualifying_acres": 9.0,
+  "runs_acres": 0.0,
+  "runs_polygons": 0,
+  "seconds": 0.2
+}

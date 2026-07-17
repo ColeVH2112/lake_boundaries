@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Data downloads — large rasters/vectors stay out of git; see data/README for fetch scripts
+data/raw/
+data/interim/
+*.tif
+*.tiff
+*.gdb/
+*.gpkg
+*.zip
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
