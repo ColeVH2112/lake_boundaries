@@ -1,6 +1,6 @@
 [
   {
-    "lake": "Lake Hayden",
+    "lake": "Fernan Lake",
     "criteria": {
       "min_depth_ft": 0.0,
       "min_shore_dist_ft": 500.0,
@@ -10,11 +10,11 @@
       "depth_source": "none"
     },
     "has_depth": false,
-    "lake_area_acres": 3854.1,
+    "lake_area_acres": 364.3,
     "max_depth_ft": null,
-    "qualifying_acres": 2372.9,
-    "runs_acres": 2364.9,
+    "qualifying_acres": 100.8,
+    "runs_acres": 93.7,
     "runs_polygons": 1,
-    "seconds": 1.1
+    "seconds": 0.1
   }
 ]

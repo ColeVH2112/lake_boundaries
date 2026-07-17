@@ -89,9 +89,10 @@
   <header>
     <div class="kicker">Kootenai County · Idaho</div>
     <h1>Lake zone explorer</h1>
-    <p class="sub">Drag the sliders to outline the parts of a lake that are far enough from shore,
-      deep enough, and roomy enough to hold a straight run of open water. Everything recomputes in
-      your browser. Distance-from-shore works on any lake; depth appears where survey data exists.</p>
+    <p class="sub">Pick a lake and drag <b>distance from shore</b> to outline the open water beyond a
+      chosen setback — no-wake buffers, shoreline zones, or room for a straight run. Everything
+      recomputes in your browser; nothing to install. Works on any lake from its outline alone;
+      depth is an optional extra where survey data exists.</p>
   </header>
 
   <div class="app">
@@ -127,8 +128,9 @@
           <input type="range" id="run" min="0" max="6000" step="100" value="3000" />
         </label>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.9rem;">
+          <button class="preset" data-d="300" data-z="0" data-r="0">Idaho no-wake (300 ft)</button>
+          <button class="preset" data-d="500" data-z="0" data-r="0">500 ft from shore</button>
           <button class="preset" data-d="500" data-z="20" data-r="3000">Seaplane (20·500·3000)</button>
-          <button class="preset" data-d="200" data-z="0" data-r="0">Open water ≥200 ft</button>
           <button class="preset" data-d="0" data-z="0" data-r="0">Whole lake</button>
         </div>
       </div>

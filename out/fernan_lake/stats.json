@@ -1,0 +1,18 @@
+{
+  "lake": "Fernan Lake",
+  "criteria": {
+    "min_depth_ft": 0.0,
+    "min_shore_dist_ft": 500.0,
+    "run_length_ft": 3000.0,
+    "angle_step_deg": 5.0,
+    "cell_m": 10.0,
+    "depth_source": "none"
+  },
+  "has_depth": false,
+  "lake_area_acres": 364.3,
+  "max_depth_ft": null,
+  "qualifying_acres": 100.8,
+  "runs_acres": 93.7,
+  "runs_polygons": 1,
+  "seconds": 0.1
+}

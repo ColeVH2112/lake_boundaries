@@ -75,5 +75,33 @@
     "has_depth": false,
     "lake_area_acres": 3854.1,
     "max_depth_ft": null
+  },
+  {
+    "slug": "spirit_lake",
+    "name": "Spirit Lake",
+    "has_depth": false,
+    "lake_area_acres": 1547.1,
+    "max_depth_ft": null
+  },
+  {
+    "slug": "twin_lakes",
+    "name": "Twin Lakes",
+    "has_depth": false,
+    "lake_area_acres": 913.4,
+    "max_depth_ft": null
+  },
+  {
+    "slug": "hauser_lake",
+    "name": "Hauser Lake",
+    "has_depth": false,
+    "lake_area_acres": 603.2,
+    "max_depth_ft": null
+  },
+  {
+    "slug": "fernan_lake",
+    "name": "Fernan Lake",
+    "has_depth": false,
+    "lake_area_acres": 364.3,
+    "max_depth_ft": null
   }
 ]
