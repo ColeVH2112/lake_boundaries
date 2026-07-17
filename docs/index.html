@@ -60,6 +60,12 @@
   .lab .muted { color:var(--ink-2); font-size:.72rem; }
   input[type=range]{ width:100%; accent-color:var(--accent); }
   input[type=range]:disabled{ opacity:.4; }
+  .numin{ width:5rem; font:inherit; font-family:ui-sans-serif,system-ui,sans-serif; font-size:.92rem;
+          text-align:right; padding:.12rem .35rem; border:1px solid var(--line); border-radius:6px;
+          background:var(--paper); color:var(--ink); font-variant-numeric:tabular-nums; }
+  .numin:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .numin:disabled{ opacity:.4; }
+  .lab .u{ color:var(--ink-2); font-size:.8rem; margin-left:.25rem; }
   select { width:100%; padding:.5rem .55rem; border:1px solid var(--line); border-radius:8px;
            background:var(--paper); color:var(--ink); font:inherit;
            font-family:ui-sans-serif,system-ui,sans-serif; font-size:.9rem; }
@@ -116,16 +122,22 @@
       <div class="card">
         <h2>Criteria</h2>
         <label class="row">
-          <span class="lab">distance from shore <b><span id="dV">500</span> ft</b></span>
-          <input type="range" id="dist" min="0" max="2000" step="50" value="500" />
+          <span class="lab"><span>distance from shore</span>
+            <span><input class="numin" type="number" id="distNum" min="0" max="4000" step="10" value="500" />
+            <span class="u">ft</span></span></span>
+          <input type="range" id="dist" min="0" max="2000" step="10" value="500" />
         </label>
         <label class="row">
-          <span class="lab">minimum depth <b><span id="zV">20</span> ft</b> <span class="muted" id="zMax"></span></span>
+          <span class="lab"><span>minimum depth <span class="muted" id="zMax"></span></span>
+            <span><input class="numin" type="number" id="depthNum" min="0" max="220" step="1" value="20" />
+            <span class="u">ft</span></span></span>
           <input type="range" id="depth" min="0" max="60" step="1" value="20" />
         </label>
         <label class="row">
-          <span class="lab">straight run length <b><span id="rV">3000</span> ft</b></span>
-          <input type="range" id="run" min="0" max="6000" step="100" value="3000" />
+          <span class="lab"><span>straight run length</span>
+            <span><input class="numin" type="number" id="runNum" min="0" max="20000" step="50" value="3000" />
+            <span class="u">ft</span></span></span>
+          <input type="range" id="run" min="0" max="6000" step="50" value="3000" />
         </label>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.9rem;">
           <button class="preset" data-d="300" data-z="0" data-r="0">Idaho no-wake (300 ft)</button>
@@ -223,11 +235,12 @@ function straightRun(qual, w, h, runPx, angleStep){
 }
 
 // ---- render ------------------------------------------------------------
+function numval(id){ const v = parseFloat(el(id).value); return isFinite(v) && v > 0 ? v : 0; }
 function compute(){
   if(!LAKE) return;
   const w=LAKE.width, h=LAKE.height, N=w*h;
-  const distFt = +el('dist').value, depthFt = +el('depth').value, runFt = +el('run').value;
-  el('dV').textContent=distFt; el('zV').textContent=depthFt; el('rV').textContent=runFt;
+  // the number field is the source of truth (it can exceed the slider's range)
+  const distFt = numval('distNum'), depthFt = numval('depthNum'), runFt = numval('runNum');
 
   const qual=new Uint8Array(N);
   const distThresh = distFt*FT;
@@ -286,10 +299,21 @@ async function loadLake(slug){
   for(let i=0;i<DIST.length;i++) MASK[i] = DIST[i]!==SENT ? 1 : 0;
   DEPTH = LAKE.has_depth ? b64ToI16(LAKE.depth_ft) : null;
 
-  const dz = el('depth');
-  dz.disabled = !LAKE.has_depth;
-  el('zMax').textContent = LAKE.has_depth ? `(max ${LAKE.max_depth_ft} ft)` : '(no depth data)';
-  if(LAKE.has_depth){ dz.max = Math.max(20, Math.ceil(LAKE.max_depth_ft)); }
+  // size the distance / run controls to this lake's actual geometry
+  let maxDist=0; for(let i=0;i<DIST.length;i++) if(MASK[i] && DIST[i]>maxDist) maxDist=DIST[i];
+  const maxDistFt = Math.ceil(maxDist/FT/50)*50;
+  el('dist').max = Math.max(500, maxDistFt);
+  el('distNum').max = Math.max(500, maxDistFt);
+  const maxRun = Math.max(3000, Math.ceil(2*maxDist/FT/500)*500);
+  el('run').max = maxRun; el('runNum').max = maxRun;
+
+  const depthOn = LAKE.has_depth;
+  el('depth').disabled = !depthOn; el('depthNum').disabled = !depthOn;
+  el('zMax').textContent = depthOn ? `(max ${LAKE.max_depth_ft} ft)` : '(no depth data — off)';
+  if(depthOn){
+    const zmax = Math.max(20, Math.ceil(LAKE.max_depth_ft));
+    el('depth').max = zmax; el('depthNum').max = zmax;
+  } else { el('depthNum').value = 0; el('depth').value = 0; }
   el('badge').textContent = `${LAKE.name} · ${Math.round(LAKE.lake_area_acres).toLocaleString()} ac`;
   el('cellNote').textContent = Math.round(LAKE.cell_m);
   el('method').innerHTML = LAKE.has_depth
@@ -308,11 +332,26 @@ async function init(){
   man.forEach(m=>{ const o=document.createElement('option'); o.value=m.slug;
     o.textContent = m.name + (m.has_depth?'':' — geometry only'); sel.appendChild(o); });
   sel.onchange = ()=>loadLake(sel.value);
-  ['dist','depth','run'].forEach(id=> el(id).addEventListener('input', compute));
+  // two-way sync: drag the slider or type a number — both drive the map,
+  // and typing can exceed the slider's range (the slider just pins at its max)
+  [['dist','distNum'],['depth','depthNum'],['run','runNum']].forEach(([rid,nid])=>{
+    const r=el(rid), n=el(nid);
+    r.addEventListener('input', ()=>{ n.value=r.value; compute(); });
+    n.addEventListener('input', ()=>{ const v=parseFloat(n.value);
+      if(isFinite(v)) r.value=Math.max(+r.min, Math.min(+r.max, v)); compute(); });
+    n.addEventListener('change', ()=>{ let v=parseFloat(n.value); if(!isFinite(v)) v=+n.min;
+      v=Math.max(+n.min, Math.min(+n.max, v)); n.value=v;
+      r.value=Math.max(+r.min, Math.min(+r.max, v)); compute(); });
+  });
   document.querySelectorAll('button.preset').forEach(b=> b.onclick=()=>{
-    el('dist').value=b.dataset.d; el('depth').value=b.dataset.z; el('run').value=b.dataset.r; compute();
+    setPair('dist','distNum',+b.dataset.d); setPair('depth','depthNum',+b.dataset.z);
+    setPair('run','runNum',+b.dataset.r); compute();
   });
   await loadLake(man[0].slug);
+}
+function setPair(rid,nid,v){
+  el(nid).value=v;
+  el(rid).value=Math.max(+el(rid).min, Math.min(+el(rid).max, v));
 }
 init();
 </script>
