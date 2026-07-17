@@ -17,3 +17,5 @@ data/interim/
 .DS_Store
 .vscode/
 .idea/
+out/**/*_basemap.jpg
+data/interim/
