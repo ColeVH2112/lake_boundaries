@@ -1,0 +1,38 @@
+{
+  "_credits": "Bathymetry © Coeur d'Alene Tribe & Avista Corp. (public, credit requested). Lake outlines: USGS NHD High Resolution (US public domain). Aerial imagery: Esri World Imagery. Dock locations: computer-vision extraction from aerial imagery (screening-grade). Analysis: lakezones pipeline.",
+  "_accuracy": "Screening-grade, not navigation-grade. Distances are measured from the NHD full-pool shoreline; depths (where shown) reference the 2,128 ft summer full pool, and winter drawdown (~7 ft) shrinks every zone. Dock detections are automated and include some false positives.",
+  "coeur_dalene_lake": {
+    "depth": "Coeur d'Alene Tribe / Avista bathymetry (2004): 5/10-ft depth contours to ~210 ft, from Post Falls Dam relicensing surveys (single-beam, late-1990s–2000s).",
+    "docks": null,
+    "note": "Web map is downsampled to ~70 m cells (large lake), so no dock layer here."
+  },
+  "rose_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours from USGS 1991–92 work; shallow (≤20 ft).", "docks": null},
+  "killarney_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); shallow (≤15 ft).", "docks": null},
+  "medicine_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); shallow (≤15 ft).", "docks": null},
+  "cave_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); shallow (≤15 ft).", "docks": null},
+  "black_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); ≤25 ft.", "docks": null},
+  "blue_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); ≤30 ft.", "docks": null},
+  "anderson_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); shallow (≤15 ft).", "docks": null},
+  "thompson_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); ≤25 ft.", "docks": null},
+  "swan_lake": {"depth": "Coeur d'Alene Tribe / Avista bathymetry: coarse 5-ft contours (USGS 1991–92); shallow (≤20 ft).", "docks": null},
+  "lake_hayden": {
+    "depth": "No open digital bathymetry (the 2022 crowdsourced survey is view-only in C-MAP Genesis). Analyzed geometry-only — distance from shore, no depth filter.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade; some over-detection on dense shoreline)."
+  },
+  "spirit_lake": {
+    "depth": "No open digital bathymetry (~100 ft max reported). Analyzed geometry-only.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade)."
+  },
+  "twin_lakes": {
+    "depth": "No open digital bathymetry (Upper/Lower Twin). Analyzed geometry-only.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade)."
+  },
+  "hauser_lake": {
+    "depth": "No open digital bathymetry (~40 ft max reported). Analyzed geometry-only.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade)."
+  },
+  "fernan_lake": {
+    "depth": "A University of Idaho sounding survey exists (2014–15) but is CC BY-NC-SA (non-commercial), so it is kept out of this tool. Analyzed geometry-only.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade; a shallow, partly-marshy lake, so expect more false positives here)."
+  }
+}

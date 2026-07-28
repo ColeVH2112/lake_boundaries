@@ -1,7 +1,11 @@
 # lake_boundaries — Kootenai County lake depth-zone detector
 
 **▶ Interactive explorer: https://colevh2112.github.io/lake_boundaries/** — pick a
-lake and drag the distance-from-shore slider; recomputes live in the browser.
+lake and set a distance-from-shore (plus optional depth, straight-run, and dock
+settings); zones recompute live over an aerial basemap. Hover any point to read
+its depth / distance / coordinates, see live stats (% qualifying, shoreline
+length, longest straight run), toggle detected docks, copy a shareable link, and
+download the view as an image or the zone outline as GeoJSON.
 
 
 Deterministic geospatial pipeline that maps the lakes of Kootenai County, Idaho,
