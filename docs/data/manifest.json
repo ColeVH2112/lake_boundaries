@@ -104,6 +104,14 @@
     "max_depth_ft": null
   },
   {
+    "slug": "cocolalla_lake",
+    "name": "Cocolalla Lake",
+    "has_depth": false,
+    "has_docks": true,
+    "lake_area_acres": 814.6,
+    "max_depth_ft": null
+  },
+  {
     "slug": "hauser_lake",
     "name": "Hauser Lake",
     "has_depth": false,
@@ -117,6 +125,14 @@
     "has_depth": false,
     "has_docks": true,
     "lake_area_acres": 364.3,
+    "max_depth_ft": null
+  },
+  {
+    "slug": "spokane_river_post_falls_to_stateline",
+    "name": "Spokane River (Post Falls to Stateline)",
+    "has_depth": false,
+    "has_docks": true,
+    "lake_area_acres": 170.3,
     "max_depth_ft": null
   }
 ]

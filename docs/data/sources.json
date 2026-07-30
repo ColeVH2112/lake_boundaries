@@ -31,6 +31,15 @@
     "depth": "No open digital bathymetry (~40 ft max reported). Analyzed geometry-only.",
     "docks": "CV-extracted from Esri aerial imagery (screening-grade)."
   },
+  "cocolalla_lake": {
+    "depth": "No open digital bathymetry. Analyzed geometry-only (Bonner County; outline from USGS NHD).",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade)."
+  },
+  "spokane_river_post_falls_to_stateline": {
+    "depth": "River reach below Post Falls Dam — no bathymetry (the tribal survey stops at the falls). Analyzed geometry-only.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade).",
+    "note": "Segment clipped at Post Falls Dam and the Idaho–Washington state line; distances near those two cut ends treat the cut as shore, so they read slightly conservative. River level below the dam varies with dam operations more than a natural shoreline."
+  },
   "fernan_lake": {
     "depth": "A University of Idaho sounding survey exists (2014–15) but is CC BY-NC-SA (non-commercial), so it is kept out of this tool. Analyzed geometry-only.",
     "docks": "CV-extracted from Esri aerial imagery (screening-grade; a shallow, partly-marshy lake, so expect more false positives here)."

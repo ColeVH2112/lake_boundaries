@@ -1,6 +1,6 @@
 [
   {
-    "lake": "Lake Hayden",
+    "lake": "Spokane River (Post Falls to Stateline)",
     "criteria": {
       "min_depth_ft": 0.0,
       "min_shore_dist_ft": 500.0,
@@ -11,11 +11,11 @@
       "docks": 0
     },
     "has_depth": false,
-    "lake_area_acres": 3854.1,
+    "lake_area_acres": 170.3,
     "max_depth_ft": null,
-    "qualifying_acres": 2372.9,
-    "runs_acres": 2364.9,
-    "runs_polygons": 1,
-    "seconds": 1.2
+    "qualifying_acres": 0.0,
+    "runs_acres": 0.0,
+    "runs_polygons": 0,
+    "seconds": 0.8
   }
 ]

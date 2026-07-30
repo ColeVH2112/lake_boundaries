@@ -64,12 +64,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("lake")
     ap.add_argument("--huc", nargs="+", default=["17010305", "17010303"])
+    ap.add_argument("--polygon", help="outline file (any CRS) instead of NHD name lookup")
     ap.add_argument("--out", required=True)
     ap.add_argument("--no-osm", action="store_true")
     args = ap.parse_args()
 
-    wb = load_waterbodies(args.huc)
-    poly = get_lake_polygon(wb, args.lake)
+    if args.polygon:
+        from lakezones.data import polygon_from_file
+
+        poly = polygon_from_file(args.polygon)
+    else:
+        wb = load_waterbodies(args.huc)
+        poly = get_lake_polygon(wb, args.lake)
     minx, miny, maxx, maxy = poly.bounds
 
     tmp = Path(args.out).parent / "_tiles"

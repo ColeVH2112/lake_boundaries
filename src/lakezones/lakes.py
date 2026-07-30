@@ -27,8 +27,10 @@ COVERED_LAKES = [
 
 
 def slugify(name: str) -> str:
-    return (
-        name.lower()
-        .replace("'", "")
-        .replace(" ", "_")
-    )
+    """Filesystem/URL-safe slug. Apostrophes vanish (Coeur d'Alene ->
+    coeur_dalene_lake, unchanged from the original scheme); any other
+    non-alphanumeric run becomes a single underscore."""
+    import re
+
+    s = name.lower().replace("'", "")
+    return re.sub(r"[^a-z0-9]+", "_", s).strip("_")

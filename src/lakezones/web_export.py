@@ -30,6 +30,7 @@ from .lakes import DISSOLVE_TOUCHING, slugify
 DOCS = PROJECT_ROOT / "docs"
 WEB_DATA = DOCS / "data"
 DOCKS_DIR = PROJECT_ROOT / "data" / "docks"
+POLY_DIR = PROJECT_ROOT / "data" / "polygons"  # custom outlines (river reaches etc.)
 SENTINEL = -32768
 TARGET_MAX_PX = 600
 BASEMAP_MAX_PX = 900
@@ -139,15 +140,22 @@ def export_lake(slug: str, wb=None) -> dict | None:
     bounds_lonlat = {k: [round(v, 6) for v in _TO_LONLAT.transform(x, y)]
                      for k, (x, y) in corners_utm.items()}
 
-    # lake polygon (matches the run's resolution) for shoreline + dock burn
+    # lake polygon (matches the run's resolution) for shoreline + dock burn;
+    # custom outlines (e.g. clipped river reaches) take precedence over NHD lookup
     poly = None
     shoreline_ft = None
-    if wb is not None:
+    custom = POLY_DIR / f"{slug}.geojson"
+    if custom.exists():
+        from .data import polygon_from_file
+
+        poly = polygon_from_file(custom)
+    elif wb is not None:
         try:
             poly = get_lake_polygon(wb, name, dissolve_touching=name in DISSOLVE_TOUCHING)
-            shoreline_ft = round(poly.length / M_PER_FT, 0)
         except Exception:  # noqa: BLE001
             poly = None
+    if poly is not None:
+        shoreline_ft = round(poly.length / M_PER_FT, 0)
 
     depth_tifs = sorted(outdir.glob("depth_ft_*.tif"))
     has_depth = bool(depth_tifs)
