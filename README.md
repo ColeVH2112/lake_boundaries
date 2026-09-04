@@ -66,6 +66,14 @@ rasters and recomputes zones live as you drag the depth / distance / run-length
 sliders. Enable **GitHub Pages → Deploy from branch → `main` / `docs`** and it
 publishes itself. Run it locally with `python -m http.server -d docs`.
 
+Boating-rules features (piloted on the Spokane River, 95 Bridge → Post Falls
+Dam): rule presets for the Idaho 100 ft no-wake, Kootenai County 150 ft no-tow,
+WSIA 200 ft wake-surf guideline, and a "bottom line" view; designated no-wake
+zones (`data/zones/<slug>_no_wake.geojson`) burned out of the qualifying area
+with an on-map overlay and toggle; display-only caution areas
+(`<slug>_caution.geojson`); and KML + GPX downloads of the current zone outline
+for Google Earth / My Maps / chartplotters.
+
 Outputs land in `out/<lake_slug>/`:
 
 | file | contents |

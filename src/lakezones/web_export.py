@@ -31,8 +31,17 @@ DOCS = PROJECT_ROOT / "docs"
 WEB_DATA = DOCS / "data"
 DOCKS_DIR = PROJECT_ROOT / "data" / "docks"
 POLY_DIR = PROJECT_ROOT / "data" / "polygons"  # custom outlines (river reaches etc.)
+ZONES_DIR = PROJECT_ROOT / "data" / "zones"    # rule overlays: <slug>_no_wake / <slug>_caution
 SENTINEL = -32768
 TARGET_MAX_PX = 600
+# narrow rivers are all edge: downsampling inflates their acreage tallies, so
+# keep them at native resolution (larger payload, honest numbers)
+TARGET_MAX_PX_OVERRIDE = {"spokane_river_95_bridge_to_post_falls_dam": 1200}
+# EDT measures to the nearest land-cell CENTER, overstating distance to the true
+# shoreline by ~half a cell — negligible on lakes, material on a narrow river.
+# Waters listed here get the half-cell correction so acreages reconcile with
+# vector buffers (the HLWID ArcGIS model).
+EDGE_CORRECTED = {"spokane_river_95_bridge_to_post_falls_dam"}
 BASEMAP_MAX_PX = 900
 
 _TO_LONLAT = Transformer.from_crs(CRS_UTM, "EPSG:4326", always_xy=True)
@@ -82,9 +91,30 @@ def _dock_field(poly, slug, native_cell, factor, hh, ww):
     mask, tr = build_mask_raster(poly, native_cell)
     docks = _dedupe_points(gpd.read_file(DOCKS_DIR / f"{slug}_cv.geojson").to_crs(CRS_UTM))
     mask_d = burn_docks(mask, docks.geometry.values, tr, width_m=6.0)
-    arr = np.where(mask, distance_from_shore_m(mask_d, native_cell), np.nan)
+    d = distance_from_shore_m(mask_d, native_cell)
+    if slug in EDGE_CORRECTED:
+        d = np.maximum(d - native_cell / 2, 0.0)
+    arr = np.where(mask, d, np.nan)
     ds = _downsample(arr, factor)[:hh, :ww]
     return _pack_int16(ds), docks
+
+
+def _zone_layer(slug, kind, west, north, web_cell, hh, ww):
+    """Rasterize a rule-overlay GeoJSON (designated no-wake zones, caution areas)
+    onto the exported grid. Returns (packed Int16 0/1 base64, [zone names]) or None."""
+    from rasterio import features
+    from rasterio.transform import from_origin
+
+    path = ZONES_DIR / f"{slug}_{kind}.geojson"
+    if not path.exists():
+        return None
+    zones = gpd.read_file(path).to_crs(CRS_UTM)
+    if not len(zones):
+        return None
+    tr = from_origin(west, north, web_cell, web_cell)
+    m = features.geometry_mask(zones.geometry.values, (hh, ww), tr, invert=True)
+    names = [str(n) for n in zones.get("name", [])]
+    return _pack_int16(m.astype(float)), names
 
 
 def _fetch_basemap(slug, west, south, east, north, ww, hh, retries=5) -> bool:
@@ -94,7 +124,7 @@ def _fetch_basemap(slug, west, south, east, north, ww, hh, retries=5) -> bool:
     out = WEB_DATA / f"{slug}_imagery.jpg"
     if out.exists() and out.stat().st_size > 10000:
         return True
-    scale = BASEMAP_MAX_PX / max(ww, hh)
+    scale = max(BASEMAP_MAX_PX, TARGET_MAX_PX_OVERRIDE.get(slug, 0)) / max(ww, hh)
     iw, ih = max(1, round(ww * scale)), max(1, round(hh * scale))
     url = IMAGERY_URL.format(w=west, s=south, e=east, n=north, iw=iw, ih=ih)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -125,9 +155,12 @@ def export_lake(slug: str, wb=None) -> dict | None:
         dist = src.read(1)
         b = src.bounds
         native_cell = src.transform.a
+    if slug in EDGE_CORRECTED:
+        with np.errstate(invalid="ignore"):
+            dist = np.maximum(dist - native_cell / 2, 0.0)
 
     h, w = dist.shape
-    factor = max(1, math.ceil(max(h, w) / TARGET_MAX_PX))
+    factor = max(1, math.ceil(max(h, w) / TARGET_MAX_PX_OVERRIDE.get(slug, TARGET_MAX_PX)))
     web_cell = native_cell * factor
     dist_ds = _downsample(dist, factor)
     hh, ww = dist_ds.shape
@@ -196,13 +229,21 @@ def export_lake(slug: str, wb=None) -> dict | None:
         payload["n_docks"] = n_docks
         has_docks = True
 
+    n_zones = 0
+    for kind, key in (("no_wake", "no_wake"), ("caution", "caution")):
+        z = _zone_layer(slug, kind, west, north, web_cell, hh, ww)
+        if z is not None:
+            payload[key], payload[f"{key}_names"] = z
+            n_zones += len(z[1])
+
     has_imagery = _fetch_basemap(slug, west, south, east, north, ww, hh)
     payload["imagery"] = f"{slug}_imagery.jpg" if has_imagery else None
 
     WEB_DATA.mkdir(parents=True, exist_ok=True)
     (WEB_DATA / f"{slug}.json").write_text(json.dumps(payload))
     kb = len((WEB_DATA / f"{slug}.json").read_text()) // 1024
-    tag = ("depth+dist" if has_depth else "dist only") + (f" +{n_docks} docks" if has_docks else "")
+    tag = ("depth+dist" if has_depth else "dist only") + (f" +{n_docks} docks" if has_docks else "") \
+        + (f" +{n_zones} rule zones" if n_zones else "")
     print(f"[web] {name:<24} {ww}x{hh} @ {web_cell:.0f} m  {tag}"
           f"{'  +imagery' if has_imagery else ''}  ({kb} KB)")
     return {"slug": slug, "name": name, "has_depth": has_depth, "has_docks": has_docks,

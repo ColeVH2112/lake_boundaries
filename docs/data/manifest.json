@@ -112,6 +112,14 @@
     "max_depth_ft": null
   },
   {
+    "slug": "spokane_river_95_bridge_to_post_falls_dam",
+    "name": "Spokane River (95 Bridge to Post Falls Dam)",
+    "has_depth": false,
+    "has_docks": true,
+    "lake_area_acres": 665.9,
+    "max_depth_ft": null
+  },
+  {
     "slug": "hauser_lake",
     "name": "Hauser Lake",
     "has_depth": false,

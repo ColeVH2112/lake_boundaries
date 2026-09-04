@@ -1,9 +1,9 @@
 [
   {
-    "lake": "Spokane River (Post Falls to Stateline)",
+    "lake": "Spokane River (95 Bridge to Post Falls Dam)",
     "criteria": {
       "min_depth_ft": 0.0,
-      "min_shore_dist_ft": 500.0,
+      "min_shore_dist_ft": 150.0,
       "run_length_ft": 3000.0,
       "angle_step_deg": 5.0,
       "cell_m": 10.0,
@@ -11,11 +11,11 @@
       "docks": 0
     },
     "has_depth": false,
-    "lake_area_acres": 170.3,
+    "lake_area_acres": 665.9,
     "max_depth_ft": null,
-    "qualifying_acres": 0.0,
-    "runs_acres": 0.0,
-    "runs_polygons": 0,
-    "seconds": 0.8
+    "qualifying_acres": 340.1,
+    "runs_acres": 145.0,
+    "runs_polygons": 4,
+    "seconds": 1.5
   }
 ]

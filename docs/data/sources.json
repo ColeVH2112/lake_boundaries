@@ -35,6 +35,11 @@
     "depth": "No open digital bathymetry. Analyzed geometry-only (Bonner County; outline from USGS NHD).",
     "docks": "CV-extracted from Esri aerial imagery (screening-grade)."
   },
+  "spokane_river_95_bridge_to_post_falls_dam": {
+    "depth": "River reach between the Hwy 95 bridge and Post Falls Dam — no open bathymetry. Analyzed geometry-only. Outline: USGS 3DHP (2023) waterbody, the same shoreline used in the HLWID ArcGIS draft (665.9 ac), so acreages reconcile with that model.",
+    "docks": "CV-extracted from Esri aerial imagery (screening-grade). The HLWID ArcGIS draft buffers from shore only; this map can also measure from docks (toggle).",
+    "note": "Designated no-wake zones (upstream of 300 ft below the Hwy 95 bridge, Black Bay, and Templins Marina to Post Falls Dam) are digitized from landmark descriptions and are APPROXIMATE pending official HLWID boundaries. Distance grid is half-cell corrected; shore-only acreages reconcile with the HLWID ArcGIS buffer model within ~5%, erring conservative (less legal water shown). The reach's two cut ends (bridge and dam) are treated as shore. Log booms, piers, and caution areas (shallows, rocks, swim/camp areas) are not yet digitized — pending HLWID's Google Earth data. Rules referring to swimmers or moving boats cannot be mapped."
+  },
   "spokane_river_post_falls_to_stateline": {
     "depth": "River reach below Post Falls Dam — no bathymetry (the tribal survey stops at the falls). Analyzed geometry-only.",
     "docks": "CV-extracted from Esri aerial imagery (screening-grade).",
