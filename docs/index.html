@@ -39,6 +39,10 @@
     display:flex; align-items:center; justify-content:center;
   }
   canvas { display:block; max-width:100%; height:auto; image-rendering:auto; cursor:crosshair; }
+  /* very wide waters (river reaches) would collapse to a sliver: fix the display
+     height and let the map scroll sideways instead */
+  .stage.wide{ justify-content:flex-start; overflow-x:auto; }
+  .stage.wide canvas{ max-width:none; height:min(60vw,340px); width:auto; }
   .badge {
     position:absolute; left:12px; top:12px; font-family:ui-sans-serif,system-ui,sans-serif;
     font-size:.72rem; background:color-mix(in srgb,var(--panel) 85%,transparent);
@@ -188,7 +192,7 @@
         </div>
         <div class="note" style="margin-top:.8rem; letter-spacing:.08em; text-transform:uppercase; font-size:.64rem;">Kootenai County &amp; Idaho boating rules</div>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.35rem;">
-          <button class="preset" data-d="100" data-z="0" data-r="0" data-k="1" title="Idaho: no wake within 100 ft of a dock, swimmer, or person in the water (any vessel)">State no-wake (100 ft)</button>
+          <button class="preset" data-d="100" data-z="0" data-r="0" data-k="1" title="Idaho: no wake within 100 ft of a dock, swimmer, or person in the water (any vessel). Swimmers and boats move, so this maps the fixed part conservatively: 100 ft from shore and every dock.">State no-wake (100 ft)</button>
           <button class="preset" data-d="150" data-z="0" data-r="0" data-k="1" title="Kootenai County: no skiing, towing, or surfing within 150 ft of shore, docks, piers, or structures in the water">County no-tow (150 ft)</button>
           <button class="preset" data-d="200" data-z="0" data-r="0" data-k="1" title="WSIA guideline (not law): wake surf at least 200 ft from shore, docks, piers, and structures">WSIA surf (200 ft)</button>
           <button class="preset" data-d="300" data-z="0" data-r="0" data-k="1" title="Room to pass: 300 ft from shore leaves legal water inshore of you for a passing boat at 100 ft separation">Room to pass (300 ft)</button>
@@ -229,7 +233,7 @@
     Screening-grade. Web grid is downsampled (~<span id="cellNote">?</span> m cells); imagery © Esri.
     Authoritative full-resolution analysis and data credits are in the
     <a href="https://github.com/ColeVH2112/lake_boundaries">repository</a>.
-    Bathymetry © Coeur d'Alene Tribe &amp; Avista Corp.; outlines USGS NHD (public domain).
+    Bathymetry © Coeur d'Alene Tribe &amp; Avista Corp.; outlines USGS NHD / 3DHP (public domain).
   </footer>
 </div>
 
@@ -474,12 +478,19 @@ function inspect(e){
   let parts=[`<b>${distFt.toLocaleString()} ft</b> from ${el('docks').checked&&DIST_DOCKS?'shore/dock':'shore'}`];
   if(LAKE.has_depth && DEPTH[i]>0) parts.push(`<b>${Math.round(DEPTH[i])} ft</b> deep`);
   const inQ = QUAL && QUAL[i], inR = RUNS && RUNS[i];
-  if(NOWAKE && NOWAKE[i]) parts.push('<b>designated no-wake zone</b>');
-  else if(CAUTION && CAUTION[i]) parts.push('<b>caution area</b>');
-  else parts.push(inR?'in a <b>run zone</b>':(inQ?'in a <b>qualifying zone</b>':'not qualifying'));
+  if(NOWAKE && NOWAKE[i] && el('nowake').checked) parts.push('<b>designated no-wake zone</b>');
+  else {
+    if(CAUTION && CAUTION[i]) parts.push('<b>caution area</b>');
+    parts.push(inR?'in a <b>run zone</b>':(inQ?'in a <b>qualifying zone</b>':'not qualifying'));
+    if(NOWAKE && NOWAKE[i]) parts.push('<span style="opacity:.7">no-wake zone (not applied)</span>');
+  }
   el('inspect').innerHTML = parts.join(' · ') + `<br><span style="opacity:.75">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`;
   tip.innerHTML = parts.slice(0,2).join(' · ');
-  tip.style.left=(e.clientX-rect.left)+'px'; tip.style.top=(e.clientY-rect.top)+'px';
+  // tip is absolute inside .stage, so position against the stage (accounting for
+  // scroll on wide waters), not the canvas rect
+  const stage=cv.parentElement, srect=stage.getBoundingClientRect();
+  tip.style.left=(e.clientX-srect.left+stage.scrollLeft)+'px';
+  tip.style.top=(e.clientY-srect.top+stage.scrollTop)+'px';
   tip.classList.add('on');
 }
 
@@ -513,8 +524,12 @@ function exportPng(){
   const ctx=out.getContext('2d');
   ctx.fillStyle='#0d181f'; ctx.fillRect(0,0,out.width,out.height);
   ctx.drawImage(src,0,0);
-  ctx.fillStyle='#fff'; ctx.font='600 15px ui-sans-serif,system-ui,sans-serif'; ctx.textBaseline='middle';
-  ctx.fillText(critLabel(), 10, src.height+23);
+  ctx.fillStyle='#fff'; ctx.textBaseline='middle';
+  const cap=critLabel();
+  let fs=15;
+  do { ctx.font=`600 ${fs}px ui-sans-serif,system-ui,sans-serif`; fs--; }
+  while(fs>9 && ctx.measureText(cap).width > out.width-20);
+  ctx.fillText(cap, 10, src.height+23);
   out.toBlob(b=>download(b, `${LAKE.slug}_zones.png`));
 }
 function download(blob, fname){
@@ -542,6 +557,7 @@ function exportGeoJson(){
     if(y===0||!m[i-w]) segs.push([corner(x,y),corner(x+1,y)]);      // top
     if(y===h-1||!m[i+w]) segs.push([corner(x,y+1),corner(x+1,y+1)]);// bottom
   }
+  if(!segs.length){ flash('nothing qualifies — nothing to export'); return; }
   const gj={type:'FeatureCollection',features:[{type:'Feature',
     properties:{lake:LAKE.name, layer:(RUNS?'straight-run zone':'qualifying zone'),
       min_shore_dist_ft:numval('distNum'), min_depth_ft:LAKE.has_depth?numval('depthNum'):0,
@@ -581,7 +597,9 @@ function boundaryRings(m){
 function xmlEsc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
 function exportKml(){
   const m=RUNS||QUAL; if(!m){ flash('nothing to export'); return; }
-  const lines=boundaryRings(m).map(r=>'<LineString><tessellate>1</tessellate><coordinates>'
+  const rings=boundaryRings(m);
+  if(!rings.length){ flash('nothing qualifies — nothing to export'); return; }
+  const lines=rings.map(r=>'<LineString><tessellate>1</tessellate><coordinates>'
       + r.map(p=>p[0]+','+p[1]+',0').join(' ') + '</coordinates></LineString>').join('');
   const kml='<?xml version="1.0" encoding="UTF-8"?>'
     +'<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
@@ -594,7 +612,9 @@ function exportKml(){
 }
 function exportGpx(){
   const m=RUNS||QUAL; if(!m){ flash('nothing to export'); return; }
-  const trks=boundaryRings(m).map((r,i)=>`<trk><name>${xmlEsc(LAKE.name)} zone ${i+1}</name><trkseg>`
+  const rings=boundaryRings(m);
+  if(!rings.length){ flash('nothing qualifies — nothing to export'); return; }
+  const trks=rings.map((r,i)=>`<trk><name>${xmlEsc(LAKE.name)} zone ${i+1}</name><trkseg>`
       + r.map(p=>`<trkpt lat="${p[1]}" lon="${p[0]}"/>`).join('') + '</trkseg></trk>').join('');
   const gpx='<?xml version="1.0" encoding="UTF-8"?>'
     +`<gpx version="1.1" creator="${xmlEsc('lake-zones · '+critLabel())}" `
@@ -620,9 +640,14 @@ function loadBasemap(name){
     const im=new Image(); im.onload=()=>res(im); im.onerror=()=>res(null); im.src='data/'+name;
   });
 }
+let loadSeq = 0;
 async function loadLake(slug){
+  const tok = ++loadSeq;                 // guard against rapid-switch races
+  clearTimeout(runTimer); QUAL=null; RUNS=null;
   el('badge').textContent='loading…';
-  const r = await fetch(`data/${slug}.json`); LAKE = await r.json();
+  const r = await fetch(`data/${slug}.json`); const data = await r.json();
+  if(tok!==loadSeq) return;
+  LAKE = data;
   DIST = b64ToI16(LAKE.dist_m);
   MASK = new Uint8Array(DIST.length);
   for(let i=0;i<DIST.length;i++) MASK[i] = DIST[i]!==SENT ? 1 : 0;
@@ -630,7 +655,10 @@ async function loadLake(slug){
   DIST_DOCKS = LAKE.dist_m_docks ? b64ToI16(LAKE.dist_m_docks) : null;
   NOWAKE = LAKE.no_wake ? b64ToI16(LAKE.no_wake) : null;
   CAUTION = LAKE.caution ? b64ToI16(LAKE.caution) : null;
-  BASEMAP = await loadBasemap(LAKE.imagery);
+  const bm = await loadBasemap(LAKE.imagery);
+  if(tok!==loadSeq) return;
+  BASEMAP = bm;
+  el('c').parentElement.classList.toggle('wide', LAKE.width/LAKE.height > 2.5);
 
   el('nwRow').style.display = NOWAKE ? 'flex' : 'none';
   if(!NOWAKE) el('nowake').checked = true;
@@ -656,6 +684,13 @@ async function loadLake(slug){
   if(depthOn){ const zmax=Math.max(20,Math.ceil(LAKE.max_depth_ft)); el('depth').max=zmax; el('depthNum').max=zmax; }
   else { el('depthNum').value=0; el('depth').value=0; }
 
+  // lowering a number input's max does NOT clamp its value (unlike a range), so
+  // re-clamp explicitly or compute() keeps using the previous water's setting
+  for(const [rid,nid] of [['dist','distNum'],['run','runNum'],['depth','depthNum']]){
+    const v = Math.min(parseFloat(el(nid).value)||0, +el(nid).max);
+    setPair(rid, nid, v);
+  }
+
   el('badge').textContent = `${LAKE.name} · ${Math.round(LAKE.lake_area_acres).toLocaleString()} ac`;
   el('areaAc').textContent = Math.round(LAKE.lake_area_acres).toLocaleString();
   el('shoreMi').textContent = LAKE.shoreline_ft ? (LAKE.shoreline_ft/5280).toFixed(1) : '–';
@@ -663,14 +698,18 @@ async function loadLake(slug){
   el('method').innerHTML = LAKE.has_depth
     ? 'Depth from digitized bathymetric contours over aerial imagery. Amber = meets depth &amp; distance; red = also fits a straight run.'
     : 'No depth survey — shade shows distance from shore over imagery. Amber = far enough from shore; red = also fits a straight run.';
+  buildLegend();
+  renderSources(slug);
+  compute();
+}
+function buildLegend(){
+  const dockOn = !!DIST_DOCKS;
   el('legend').innerHTML =
     (LAKE.has_depth ? sw('#0c3760','deep') : sw('#0a6e78','far from shore')) +
     sw('#c8860a','qualifying') + sw('#c5433f','straight run') +
-    (NOWAKE ? sw('#781a2e','designated no-wake') : '') +
+    (NOWAKE && el('nowake').checked ? sw('#781a2e','designated no-wake') : '') +
     (CAUTION ? sw('#e6be28','caution') : '') +
     (dockOn ? '<span><span class="sw dot" style="background:#ff3c3c"></span>dock</span>' : '');
-  renderSources(slug);
-  compute();
 }
 function sw(color,label){ return `<span><span class="sw" style="background:${color}"></span>${label}</span>`; }
 
@@ -691,11 +730,17 @@ async function init(){
       rg.value=Math.max(+rg.min, Math.min(+rg.max, v)); compute(); });
   });
   el('docks').addEventListener('change', compute);
-  el('nowake').addEventListener('change', compute);
+  el('nowake').addEventListener('change', ()=>{ buildLegend(); compute(); });
   document.querySelectorAll('button.preset').forEach(b=> b.onclick=()=>{
     setPair('dist','distNum',+b.dataset.d); setPair('depth','depthNum',+b.dataset.z);
     setPair('run','runNum',+b.dataset.r);
-    if(b.dataset.k !== undefined && !el('docks').disabled) el('docks').checked = b.dataset.k==='1';
+    if(b.dataset.k !== undefined){
+      if(!el('docks').disabled) el('docks').checked = b.dataset.k==='1';
+      else if(b.dataset.k==='1'){ // rule wants docks but this water has no dock layer
+        const dn=el('dockNote'); dn.style.color='var(--runs)';
+        setTimeout(()=>{ dn.style.color=''; }, 1800);
+      }
+    }
     compute();
   });
   el('copyLink').onclick=copyLink; el('dlPng').onclick=exportPng; el('dlGeo').onclick=exportGeoJson;
@@ -706,7 +751,7 @@ async function init(){
 
   const st=readHash();
   const first = (st && man.some(m=>m.slug===st.lake)) ? st.lake : man[0].slug;
-  if(st){ el('lake').value=st.lake; }
+  el('lake').value = first;   // never point the picker at an unknown slug
   await loadLake(first);
   if(st){
     setPair('dist','distNum', +st.dist||0); setPair('depth','depthNum', +st.depth||0);

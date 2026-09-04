@@ -36,12 +36,18 @@ SENTINEL = -32768
 TARGET_MAX_PX = 600
 # narrow rivers are all edge: downsampling inflates their acreage tallies, so
 # keep them at native resolution (larger payload, honest numbers)
-TARGET_MAX_PX_OVERRIDE = {"spokane_river_95_bridge_to_post_falls_dam": 1200}
+TARGET_MAX_PX_OVERRIDE = {
+    "spokane_river_95_bridge_to_post_falls_dam": 1200,
+    "spokane_river_post_falls_to_stateline": 1200,
+}
 # EDT measures to the nearest land-cell CENTER, overstating distance to the true
 # shoreline by ~half a cell — negligible on lakes, material on a narrow river.
 # Waters listed here get the half-cell correction so acreages reconcile with
 # vector buffers (the HLWID ArcGIS model).
-EDGE_CORRECTED = {"spokane_river_95_bridge_to_post_falls_dam"}
+EDGE_CORRECTED = {
+    "spokane_river_95_bridge_to_post_falls_dam",
+    "spokane_river_post_falls_to_stateline",
+}
 BASEMAP_MAX_PX = 900
 
 _TO_LONLAT = Transformer.from_crs(CRS_UTM, "EPSG:4326", always_xy=True)
@@ -113,7 +119,12 @@ def _zone_layer(slug, kind, west, north, web_cell, hh, ww):
         return None
     tr = from_origin(west, north, web_cell, web_cell)
     m = features.geometry_mask(zones.geometry.values, (hh, ww), tr, invert=True)
-    names = [str(n) for n in zones.get("name", [])]
+    if not m.any():
+        print(f"  ! {kind} zones for {slug} fall entirely outside the grid — skipped")
+        return None
+    raw = zones["name"] if "name" in zones.columns else [None] * len(zones)
+    names = [str(n) if n and str(n) != "nan" else f"zone {i + 1}"
+             for i, n in enumerate(raw)]
     return _pack_int16(m.astype(float)), names
 
 

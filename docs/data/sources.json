@@ -1,6 +1,6 @@
 {
-  "_credits": "Bathymetry © Coeur d'Alene Tribe & Avista Corp. (public, credit requested). Lake outlines: USGS NHD High Resolution (US public domain). Aerial imagery: Esri World Imagery. Dock locations: computer-vision extraction from aerial imagery (screening-grade). Analysis: lakezones pipeline.",
-  "_accuracy": "Screening-grade, not navigation-grade. Distances are measured from the NHD full-pool shoreline; depths (where shown) reference the 2,128 ft summer full pool, and winter drawdown (~7 ft) shrinks every zone. Dock detections are automated and include some false positives.",
+  "_credits": "Bathymetry © Coeur d'Alene Tribe & Avista Corp. (public, credit requested). Lake outlines: USGS NHD High Resolution / USGS 3DHP (US public domain). Aerial imagery: Esri World Imagery. Dock locations: computer-vision extraction from aerial imagery (screening-grade). Analysis: lakezones pipeline.",
+  "_accuracy": "Screening-grade, not navigation-grade. Distances are measured from the NHD/3DHP full-pool shoreline; depths (where shown) reference the 2,128 ft summer full pool, and winter drawdown (~7 ft) shrinks every zone. Dock detections are automated and include some false positives. On large downsampled waters the web grid slightly overstates water area (worst: Coeur d'Alene ~7%); river reaches are exported at native resolution with a half-cell distance correction, and the Python pipeline is authoritative.",
   "coeur_dalene_lake": {
     "depth": "Coeur d'Alene Tribe / Avista bathymetry (2004): 5/10-ft depth contours to ~210 ft, from Post Falls Dam relicensing surveys (single-beam, late-1990s–2000s).",
     "docks": null,
@@ -43,7 +43,7 @@
   "spokane_river_post_falls_to_stateline": {
     "depth": "River reach below Post Falls Dam — no bathymetry (the tribal survey stops at the falls). Analyzed geometry-only.",
     "docks": "CV-extracted from Esri aerial imagery (screening-grade).",
-    "note": "Segment clipped at Post Falls Dam and the Idaho–Washington state line; distances near those two cut ends treat the cut as shore, so they read slightly conservative. River level below the dam varies with dam operations more than a natural shoreline."
+    "note": "Segment clipped at Post Falls Dam and the Idaho–Washington state line; distances near those two cut ends treat the cut as shore, so they read slightly conservative. River level below the dam varies with dam operations more than a natural shoreline. Exported at native 10 m with the half-cell distance correction (narrow rivers are all edge, so coarser grids overstate acreage)."
   },
   "fernan_lake": {
     "depth": "A University of Idaho sounding survey exists (2014–15) but is CC BY-NC-SA (non-commercial), so it is kept out of this tool. Analyzed geometry-only.",
