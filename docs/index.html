@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0c3350" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" type="image/png" href="icon-192.png" />
 <title>Kootenai Lake Zones — interactive explorer</title>
 <style>
   :root {
@@ -106,6 +110,15 @@
   button.preset{ border-radius:999px; font-size:.76rem; padding:.25rem .6rem; }
   button.act:hover, button.preset:hover{ border-color:var(--accent); color:var(--accent); }
   .sharemsg{ font-family:ui-sans-serif,sans-serif; font-size:.72rem; color:var(--accent); margin-top:.4rem; min-height:1em; }
+  /* live GPS legality banner — pinned to the viewport so it's readable from the helm */
+  .gpsbar{ position:fixed; top:0; left:0; right:0; z-index:60; display:none; padding:.6rem .9rem;
+           font-family:ui-sans-serif,system-ui,sans-serif; font-weight:700; font-size:1.02rem;
+           color:#fff; text-align:center; box-shadow:0 2px 12px rgba(0,0,0,.35);
+           font-variant-numeric:tabular-nums; }
+  .gpsbar.ok{ display:block; background:#176d3d; }
+  .gpsbar.bad{ display:block; background:#a32633; }
+  .gpsbar.warn{ display:block; background:#5b6470; }
+  .stage.editing canvas{ cursor:copy; }
   details.sources{ font-family:ui-sans-serif,system-ui,sans-serif; }
   details.sources summary{ cursor:pointer; font-size:.82rem; letter-spacing:.12em; text-transform:uppercase;
                            color:var(--ink-2); font-weight:600; }
@@ -117,6 +130,7 @@
 </style>
 </head>
 <body>
+<div class="gpsbar" id="gpsbar"></div>
 <div class="wrap">
   <header>
     <div class="kicker">North Idaho · Kootenai &amp; Bonner counties</div>
@@ -201,6 +215,40 @@
       </div>
 
       <div class="card">
+        <h2>On the water</h2>
+        <div class="btnrow">
+          <button class="act" id="locBtn">📍 Show my location</button>
+        </div>
+        <p class="note" style="margin:.55rem 0 0;">Live GPS with feet-to-shore and a legality banner
+          against the current settings. Waters you open are cached for offline use — install this
+          site as an app from your browser's share/menu button.</p>
+      </div>
+
+      <div class="card">
+        <h2>Dock editor</h2>
+        <label class="row" style="flex-direction:row; align-items:center; gap:.55rem; margin-top:.5rem;">
+          <input type="checkbox" id="editMode" style="width:1.1rem; height:1.1rem; accent-color:var(--accent);" />
+          <span class="lab" style="display:block"><span>edit docks on the map</span></span>
+        </label>
+        <p class="note" id="editNote" style="margin:.5rem 0 0;">Click open water to add a dock; click a
+          dock to remove it. Starts from the detected set, applies to the "measure from docks"
+          distance instantly, and stays in this browser until you export.</p>
+        <div class="btnrow" style="margin-top:.6rem;">
+          <button class="act" id="dkExport">Export docks</button>
+          <button class="act" id="dkReset">Reset to detected</button>
+          <button class="act" id="dkClear">Clear all</button>
+        </div>
+        <div class="sharemsg" id="editmsg"></div>
+      </div>
+
+      <div class="card">
+        <details class="sources">
+          <summary>Boating rules here</summary>
+          <div id="rulesList"></div>
+        </details>
+      </div>
+
+      <div class="card">
         <h2>Share &amp; export</h2>
         <div class="btnrow">
           <button class="act" id="copyLink">Copy link</button>
@@ -208,6 +256,7 @@
           <button class="act" id="dlGeo">Download GeoJSON</button>
           <button class="act" id="dlKml" title="Opens in Google Earth, Google My Maps, and most GIS apps">Download KML</button>
           <button class="act" id="dlGpx" title="Loads into chartplotters and navigation apps">Download GPX</button>
+          <button class="act" id="dlPrint" title="Print-ready page — use your browser's Save as PDF">Print / PDF</button>
         </div>
         <div class="sharemsg" id="sharemsg"></div>
       </div>
@@ -246,8 +295,14 @@ let DIST = null, DIST_DOCKS = null, DEPTH = null, MASK = null;
 let NOWAKE = null, CAUTION = null;  // rule overlays (designated no-wake, caution areas)
 let BASEMAP = null;                 // Image of the aerial basemap (or null)
 let QUAL = null, RUNS = null;       // latest computed masks (for export/inspect)
+let MANUAL = null, CUSTOM_DIST = null;  // hand-edited dock set ([col,row]) + its distance field
+let PIN = null;                     // pinned rules-readout cell {col,row}
+let GPS = null, gpsWatch = null;    // live position {col,row,accM} + geolocation watch id
 let runTimer = null;
-function curDist(){ return (el('docks').checked && DIST_DOCKS) ? DIST_DOCKS : DIST; }
+function curDist(){
+  if(!el('docks').checked) return DIST;
+  return CUSTOM_DIST || DIST_DOCKS || DIST;
+}
 
 function b64ToI16(b64){
   const bin = atob(b64); const len = bin.length;
@@ -354,6 +409,7 @@ function compute(){
   QUAL=qual; RUNS=null;
   const runPx = Math.max(1, Math.round(runFt*FT/LAKE.cell_m));
   paint(qual, null);
+  renderPin(); evalGpsBanner();
   const qAc=countAcres(qual);
   el('qAc').textContent=fmt(qAc);
   el('pctQ').textContent = LAKE.lake_area_acres ? Math.round(100*qAc/LAKE.lake_area_acres)+'%' : '–';
@@ -410,19 +466,45 @@ function paint(qual, runs){
   else { ctx.fillStyle=getComputedStyle(document.body).getPropertyValue('--panel'); ctx.fillRect(0,0,dispW,dispH); }
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(zoneCanvas(qual,runs),0,0,dispW,dispH);
-  if(el('docks').checked && LAKE.docks) drawDocks(ctx, dispW, dispH);
+  const editing = el('editMode').checked;
+  if((el('docks').checked || editing) && (MANUAL || LAKE.docks)) drawDocks(ctx, dispW, dispH);
+  if(PIN) drawPin(ctx, dispW, dispH);
+  if(GPS) drawGps(ctx, dispW, dispH);
   drawScaleBar(ctx, dispW, dispH);
   drawNorth(ctx, dispW);
 }
 function drawDocks(ctx, dispW, dispH){
   const w=LAKE.width, h=LAKE.height;
+  const pts = MANUAL || LAKE.docks, manual = !!MANUAL;
   ctx.save();
-  for(const [c,r] of LAKE.docks){
+  for(const [c,r] of pts){
     const x=(c+0.5)/w*dispW, y=(r+0.5)/h*dispH;
     ctx.beginPath(); ctx.arc(x,y,Math.max(1.5,dispW/500),0,6.283);
-    ctx.fillStyle='rgba(255,60,60,.9)'; ctx.fill();
-    ctx.lineWidth=0.6; ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.stroke();
+    ctx.fillStyle = manual ? 'rgba(46,206,255,.95)' : 'rgba(255,60,60,.9)';
+    ctx.fill();
+    ctx.lineWidth=0.6; ctx.strokeStyle = manual ? 'rgba(10,40,60,.8)' : 'rgba(255,255,255,.7)';
+    ctx.stroke();
   }
+  ctx.restore();
+}
+function drawPin(ctx, dispW, dispH){
+  const x=(PIN.col+0.5)/LAKE.width*dispW, y=(PIN.row+0.5)/LAKE.height*dispH, s=Math.max(6,dispW/90);
+  ctx.save(); ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(1.6,dispW/450);
+  ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=3;
+  ctx.beginPath(); ctx.moveTo(x-s,y); ctx.lineTo(x+s,y); ctx.moveTo(x,y-s); ctx.lineTo(x,y+s); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,s*0.55,0,6.283); ctx.stroke();
+  ctx.restore();
+}
+function drawGps(ctx, dispW, dispH){
+  const x=(GPS.col+0.5)/LAKE.width*dispW, y=(GPS.row+0.5)/LAKE.height*dispH;
+  if(x<0||y<0||x>dispW||y>dispH) return;
+  const pxPerM=(dispW/LAKE.width)/LAKE.cell_m, accR=GPS.accM*pxPerM;
+  ctx.save();
+  if(accR>2 && accR<dispW){ ctx.beginPath(); ctx.arc(x,y,accR,0,6.283);
+    ctx.fillStyle='rgba(66,133,244,.15)'; ctx.fill(); }
+  ctx.beginPath(); ctx.arc(x,y,Math.max(4,dispW/160),0,6.283);
+  ctx.fillStyle='#4285f4'; ctx.fill();
+  ctx.lineWidth=Math.max(1.5,dispW/400); ctx.strokeStyle='#fff'; ctx.stroke();
   ctx.restore();
 }
 function niceLen(ft){
@@ -472,10 +554,10 @@ function inspect(e){
   const tip=el('tip');
   if(col<0||row<0||col>=LAKE.width||row>=LAKE.height){ tip.classList.remove('on'); return; }
   const i=row*LAKE.width+col;
-  if(!MASK[i]){ el('inspect').innerHTML='Outside the lake.'; tip.classList.remove('on'); return; }
+  if(!MASK[i]){ if(!PIN) el('inspect').innerHTML='Outside the lake.'; tip.classList.remove('on'); return; }
   const D=curDist(); const distFt=Math.round(D[i]/FT);
   const [lon,lat]=gridToLonLat(col,row);
-  let parts=[`<b>${distFt.toLocaleString()} ft</b> from ${el('docks').checked&&DIST_DOCKS?'shore/dock':'shore'}`];
+  let parts=[`<b>${distFt.toLocaleString()} ft</b> from ${el('docks').checked&&(CUSTOM_DIST||DIST_DOCKS)?'shore/dock':'shore'}`];
   if(LAKE.has_depth && DEPTH[i]>0) parts.push(`<b>${Math.round(DEPTH[i])} ft</b> deep`);
   const inQ = QUAL && QUAL[i], inR = RUNS && RUNS[i];
   if(NOWAKE && NOWAKE[i] && el('nowake').checked) parts.push('<b>designated no-wake zone</b>');
@@ -484,7 +566,7 @@ function inspect(e){
     parts.push(inR?'in a <b>run zone</b>':(inQ?'in a <b>qualifying zone</b>':'not qualifying'));
     if(NOWAKE && NOWAKE[i]) parts.push('<span style="opacity:.7">no-wake zone (not applied)</span>');
   }
-  el('inspect').innerHTML = parts.join(' · ') + `<br><span style="opacity:.75">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`;
+  if(!PIN) el('inspect').innerHTML = parts.join(' · ') + `<br><span style="opacity:.75">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`;
   tip.innerHTML = parts.slice(0,2).join(' · ');
   // tip is absolute inside .stage, so position against the stage (accounting for
   // scroll on wide waters), not the canvas rect
@@ -623,6 +705,217 @@ function exportGpx(){
   flash('GPX saved — loads into chartplotters & nav apps');
 }
 
+// print-ready page (browser's Save-as-PDF covers the About-doc "PDF" format)
+function printMap(){
+  if(!LAKE || !QUAL){ flash('map still loading'); return; }
+  const url = el('c').toDataURL('image/png');
+  const w = window.open('', '_blank');
+  if(!w){ flash('pop-up blocked — allow pop-ups to print'); return; }
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  w.document.write(`<!doctype html><html><head><title>${esc(LAKE.name)} — boating zones</title>
+    <style>body{font-family:-apple-system,system-ui,sans-serif;margin:24px;color:#111}
+    h1{font-size:1.25rem;margin:0 0 2px} .crit{color:#444;margin:0 0 10px;font-size:.9rem}
+    img{width:100%;border:1px solid #999;border-radius:4px}
+    .rules{font-size:.78rem;color:#333;margin-top:14px;column-count:2;column-gap:24px}
+    .rules p{margin:.3em 0;break-inside:avoid}
+    .foot{font-size:.68rem;color:#666;margin-top:12px;border-top:1px solid #ccc;padding-top:6px}
+    @media print{ body{margin:10mm} }</style></head><body>
+    <h1>${esc(LAKE.name)} — where you can boat</h1>
+    <p class="crit">${esc(critLabel())} · amber = qualifying, red = straight run, dark red = designated no-wake</p>
+    <img src="${url}"/>
+    <div class="rules">${el('rulesList').innerHTML}</div>
+    <p class="foot">Screening-grade — not for navigation. Interactive version: ${esc(location.href)}</p>
+    </body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(_){} }, 500);
+}
+
+// ---- dock editor: exact Euclidean distance transform (Felzenszwalb) -----
+const EDT_INF = 1e12;
+function edtSq1d(f, n){
+  const d=new Float64Array(n), v=new Int32Array(n), z=new Float64Array(n+1);
+  let k=0; v[0]=0; z[0]=-1e20; z[1]=1e20;
+  for(let q=1;q<n;q++){
+    let s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]);
+    while(s<=z[k]){ k--; s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]); }
+    k++; v[k]=q; z[k]=s; z[k+1]=1e20;
+  }
+  k=0;
+  for(let q=0;q<n;q++){ while(z[k+1]<q) k++; d[q]=(q-v[k])*(q-v[k])+f[v[k]]; }
+  return d;
+}
+function edt2d(seed, w, h){   // squared cell-distance to the nearest truthy seed
+  const g=new Float64Array(w*h), tmp=new Float64Array(Math.max(w,h));
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++) tmp[y]= seed[y*w+x]?0:EDT_INF;
+    const d=edtSq1d(tmp,h);
+    for(let y=0;y<h;y++) g[y*w+x]=d[y];
+  }
+  const out=new Float64Array(w*h);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++) tmp[x]=g[y*w+x];
+    const d=edtSq1d(tmp,w);
+    for(let x=0;x<w;x++) out[y*w+x]=d[x];
+  }
+  return out;
+}
+// distance-to-(shore or hand-edited dock) = min(shipped shore distance, dock EDT)
+function rebuildCustomDist(){
+  if(!MANUAL){ CUSTOM_DIST=null; return; }
+  const w=LAKE.width, h=LAKE.height, N=w*h;
+  CUSTOM_DIST=new Float32Array(N);
+  if(!MANUAL.length){ CUSTOM_DIST.set(DIST); return; }
+  const seed=new Uint8Array(N);
+  for(const [c,r] of MANUAL) if(c>=0&&c<w&&r>=0&&r<h) seed[r*w+c]=1;
+  const d2=edt2d(seed,w,h), half=LAKE.cell_m/2;
+  for(let i=0;i<N;i++){
+    const dd=Math.max(0, Math.sqrt(d2[i])*LAKE.cell_m - half);  // half-cell ≈ dock footprint
+    CUSTOM_DIST[i]=Math.min(DIST[i], dd);
+  }
+}
+function saveManual(){
+  try{ localStorage.setItem('manualDocks:'+LAKE.slug,
+    JSON.stringify({w:LAKE.width, h:LAKE.height, docks:MANUAL})); }catch(_){}
+}
+function loadManual(slug){
+  try{ const s=JSON.parse(localStorage.getItem('manualDocks:'+slug));
+    if(s && s.w===LAKE.width && s.h===LAKE.height && Array.isArray(s.docks)) return s.docks;
+  }catch(_){}
+  return null;
+}
+function refreshDockUI(){
+  const hasLayer = !!DIST_DOCKS || !!MANUAL;
+  el('docks').disabled = !hasLayer;
+  if(!hasLayer) el('docks').checked=false;
+  el('dockNote').textContent = MANUAL
+    ? `${MANUAL.length} docks — hand-edited in this browser (export to keep)`
+    : DIST_DOCKS ? `${LAKE.n_docks||''} docks detected from imagery, folded into the shoreline`
+    : 'no dock layer yet — use the dock editor to add docks by hand';
+  buildLegend();
+}
+function editFlash(msg){ el('editmsg').textContent=msg;
+  setTimeout(()=>{ if(el('editmsg').textContent===msg) el('editmsg').textContent=''; }, 2600); }
+function evtCell(e){
+  const cv=el('c'), rect=cv.getBoundingClientRect();
+  const fx=(e.clientX-rect.left)/rect.width*LAKE.width, fy=(e.clientY-rect.top)/rect.height*LAKE.height;
+  return {col:Math.floor(fx), row:Math.floor(fy), fx, fy, cellsPerPx: LAKE.width/rect.width};
+}
+function dockClick(e){
+  const p=evtCell(e);
+  if(p.col<0||p.row<0||p.col>=LAKE.width||p.row>=LAKE.height) return;
+  if(!MANUAL){ MANUAL=(LAKE.docks||[]).map(d=>d.slice()); }
+  const hitR=Math.max(1.4, 10*p.cellsPerPx);          // ~10 screen px
+  let best=-1, bd=hitR;
+  MANUAL.forEach(([c,r],i)=>{ const d=Math.hypot(c+0.5-p.fx, r+0.5-p.fy); if(d<bd){ bd=d; best=i; } });
+  if(best>=0){ MANUAL.splice(best,1); editFlash('dock removed'); }
+  else if(MASK[p.row*LAKE.width+p.col]){ MANUAL.push([p.col,p.row]); editFlash('dock added'); }
+  else { editFlash('click open water to add a dock'); return; }
+  rebuildCustomDist(); saveManual();
+  el('docks').disabled=false; el('docks').checked=true;
+  refreshDockUI(); compute();
+}
+function exportDocks(){
+  if(!MANUAL || !MANUAL.length){ editFlash('no hand-edited docks to export'); return; }
+  const feats=MANUAL.map(([c,r])=>({type:'Feature', properties:{source:'manual'},
+    geometry:{type:'Point', coordinates:cornerLonLat(c+0.5, r+0.5)}}));
+  download(new Blob([JSON.stringify({type:'FeatureCollection', features:feats})],
+    {type:'application/geo+json'}), `${LAKE.slug}_manual.geojson`);
+  editFlash(`exported ${MANUAL.length} docks — send the file to be built into the official map`);
+}
+function resetDocks(){
+  if(!LAKE) return;
+  MANUAL=null; CUSTOM_DIST=null;
+  try{ localStorage.removeItem('manualDocks:'+LAKE.slug); }catch(_){}
+  refreshDockUI(); compute(); editFlash('back to the detected dock set');
+}
+function clearDocks(){
+  if(!LAKE) return;
+  MANUAL=[]; rebuildCustomDist(); saveManual();
+  refreshDockUI(); compute(); editFlash('all docks cleared (edit mode: click water to add)');
+}
+
+// ---- pinned rules readout ------------------------------------------------
+function pinClick(e){
+  const p=evtCell(e);
+  const inGrid = p.col>=0&&p.row>=0&&p.col<LAKE.width&&p.row<LAKE.height;
+  if(!inGrid || !MASK[p.row*LAKE.width+p.col]){
+    PIN=null; el('inspect').textContent='Hover the map to read depth, distance from shore, and coordinates.';
+    paint(QUAL,RUNS); return;
+  }
+  PIN={col:p.col,row:p.row}; renderPin(); paint(QUAL,RUNS);
+}
+function renderPin(){
+  if(!PIN) return;
+  const i=PIN.row*LAKE.width+PIN.col, D=curDist(), ft=Math.round(D[i]/FT);
+  const zone = NOWAKE && NOWAKE[i] && el('nowake').checked;
+  const src = el('docks').checked ? 'shore/dock' : 'shore';
+  const [lon,lat]=gridToLonLat(PIN.col,PIN.row);
+  const chk=(ok,txt)=>`<span style="color:${ok?'#1f8a4c':'#c5433f'};white-space:nowrap">${ok?'✓':'✗'} ${txt}</span>`;
+  el('inspect').innerHTML =
+    `📌 <b>${ft.toLocaleString()} ft</b> from ${src} · ${lat.toFixed(5)}, ${lon.toFixed(5)}`
+    + ` <a href="#" id="unpin">✕</a><br>`
+    + (zone ? '<b style="color:#c5433f">Designated no-wake zone — idle speed only</b><br>' : '')
+    + [chk(!zone && ft>=100, 'wake OK — state 100 ft'),
+       chk(!zone && ft>=150, 'tow/ski/surf OK — county 150 ft'),
+       chk(!zone && ft>=200, 'surf per WSIA 200 ft guide')].join(' &nbsp;')
+    + (LAKE.has_depth && DEPTH[i]>0 ? `<br>depth ≈ <b>${Math.round(DEPTH[i])} ft</b>` : '');
+  const un=el('unpin'); if(un) un.onclick=(ev)=>{ ev.preventDefault(); PIN=null;
+    el('inspect').textContent='Hover the map to read depth, distance from shore, and coordinates.';
+    paint(QUAL,RUNS); };
+}
+
+// ---- live GPS position ---------------------------------------------------
+function lonlatToGrid(lon, lat){        // invert the bilinear corner mapping (Newton)
+  const b=LAKE.bounds_lonlat;
+  const fwd=(u,v)=>[ lerp(lerp(b.nw[0],b.ne[0],u), lerp(b.sw[0],b.se[0],u), v),
+                     lerp(lerp(b.nw[1],b.ne[1],u), lerp(b.sw[1],b.se[1],u), v) ];
+  let u=0.5, v=0.5;
+  for(let k=0;k<6;k++){
+    const F=fwd(u,v), ee=1e-7;
+    const Fu=fwd(u+ee,v), Fv=fwd(u,v+ee);
+    const a11=(Fu[0]-F[0])/ee, a12=(Fv[0]-F[0])/ee, a21=(Fu[1]-F[1])/ee, a22=(Fv[1]-F[1])/ee;
+    const det=a11*a22-a12*a21; if(!det) break;
+    const rx=lon-F[0], ry=lat-F[1];
+    u += (a22*rx - a12*ry)/det; v += (-a21*rx + a11*ry)/det;
+  }
+  return [u*LAKE.width-0.5, v*LAKE.height-0.5];   // fractional col,row (cell centers at +.5)
+}
+function gpsBanner(cls, msg){ const g=el('gpsbar'); g.className='gpsbar '+cls; g.textContent=msg; }
+function evalGpsBanner(){
+  if(!GPS) return;
+  const c=Math.round(GPS.col), r=Math.round(GPS.row);
+  if(c<0||r<0||c>=LAKE.width||r>=LAKE.height){ gpsBanner('warn','GPS: you are outside this map extent'); return; }
+  const i=r*LAKE.width+c;
+  if(!MASK[i]){ gpsBanner('warn','GPS: on land / outside the mapped water'); return; }
+  const D=curDist(), ft=Math.round(D[i]/FT), crit=numval('distNum');
+  const src=el('docks').checked?'shore/dock':'shore';
+  const zone=NOWAKE && NOWAKE[i] && el('nowake').checked;
+  if(zone) gpsBanner('bad', `${ft.toLocaleString()} ft from ${src} — DESIGNATED NO-WAKE ZONE: idle speed only`);
+  else if(ft>=crit) gpsBanner('ok', `${ft.toLocaleString()} ft from ${src} — meets the ${crit} ft setting`);
+  else gpsBanner('bad', `${ft.toLocaleString()} ft from ${src} — inside ${crit} ft: no wake / no tow here`);
+}
+function onFix(pos){
+  if(!LAKE) return;
+  const {longitude:lon, latitude:lat, accuracy:acc}=pos.coords;
+  const [col,row]=lonlatToGrid(lon,lat);
+  GPS={col,row,accM:acc||0};
+  evalGpsBanner();
+  paint(QUAL,RUNS);
+}
+function toggleGps(){
+  if(gpsWatch!==null){
+    navigator.geolocation.clearWatch(gpsWatch); gpsWatch=null; GPS=null;
+    el('gpsbar').className='gpsbar'; el('locBtn').textContent='📍 Show my location';
+    paint(QUAL,RUNS); return;
+  }
+  if(!('geolocation' in navigator)){ gpsBanner('warn','This browser has no location support'); return; }
+  el('locBtn').textContent='◼ Stop location';
+  gpsBanner('warn','Waiting for GPS…');
+  gpsWatch=navigator.geolocation.watchPosition(onFix, err=>{
+    gpsBanner('warn', err.code===1 ? 'Location permission denied' : 'No GPS fix');
+  }, {enableHighAccuracy:true, maximumAge:2000, timeout:15000});
+}
+
 // ---- sources -----------------------------------------------------------
 function renderSources(slug){
   const s = SOURCES && SOURCES[slug] || {};
@@ -645,7 +938,15 @@ async function loadLake(slug){
   const tok = ++loadSeq;                 // guard against rapid-switch races
   clearTimeout(runTimer); QUAL=null; RUNS=null;
   el('badge').textContent='loading…';
-  const r = await fetch(`data/${slug}.json`); const data = await r.json();
+  let data;
+  try{
+    const r = await fetch(`data/${slug}.json`);
+    if(!r.ok) throw new Error('http '+r.status);
+    data = await r.json();
+  }catch(_){
+    if(tok===loadSeq) el('badge').textContent="offline — this water isn't cached yet";
+    return;
+  }
   if(tok!==loadSeq) return;
   LAKE = data;
   DIST = b64ToI16(LAKE.dist_m);
@@ -655,6 +956,17 @@ async function loadLake(slug){
   DIST_DOCKS = LAKE.dist_m_docks ? b64ToI16(LAKE.dist_m_docks) : null;
   NOWAKE = LAKE.no_wake ? b64ToI16(LAKE.no_wake) : null;
   CAUTION = LAKE.caution ? b64ToI16(LAKE.caution) : null;
+  // reset per-water state BEFORE the (slow) basemap await, so sliders moved
+  // during the load never mix the new grid with the old water's docks/pin
+  PIN = null; GPS = null;   // grid coords are per-water; the next GPS fix repopulates
+  if(gpsWatch!==null) gpsBanner('warn','Waiting for GPS…');
+  else el('gpsbar').className='gpsbar';
+  el('editMode').checked = false;
+  el('c').parentElement.classList.remove('editing');
+  el('inspect').textContent = 'Hover the map to read depth, distance from shore, and coordinates.';
+  MANUAL = loadManual(slug);
+  rebuildCustomDist();
+  refreshDockUI();
   const bm = await loadBasemap(LAKE.imagery);
   if(tok!==loadSeq) return;
   BASEMAP = bm;
@@ -664,13 +976,6 @@ async function loadLake(slug){
   if(!NOWAKE) el('nowake').checked = true;
   el('nwNote').textContent = NOWAKE
     ? (LAKE.no_wake_names||[]).length + ' designated zones (approximate boundaries)' : '';
-
-  const dockOn = !!DIST_DOCKS;
-  el('docks').disabled = !dockOn;
-  if(!dockOn) el('docks').checked = false;
-  el('dockNote').textContent = dockOn
-    ? `${LAKE.n_docks||''} docks detected from imagery, folded into the shoreline`
-    : 'no dock layer for this lake yet';
 
   let maxDist=0; for(let i=0;i<DIST.length;i++) if(MASK[i] && DIST[i]>maxDist) maxDist=DIST[i];
   const maxDistFt = Math.ceil(maxDist/FT/50)*50;
@@ -700,16 +1005,35 @@ async function loadLake(slug){
     : 'No depth survey — shade shows distance from shore over imagery. Amber = far enough from shore; red = also fits a straight run.';
   buildLegend();
   renderSources(slug);
+  buildRules();
   compute();
 }
+function buildRules(){
+  const zones = (NOWAKE && LAKE.no_wake_names && LAKE.no_wake_names.length)
+    ? `<p><b>Designated no-wake zones on this water:</b> ${LAKE.no_wake_names.join('; ')}.
+       Idle speed only inside them, regardless of distance.</p>` : '';
+  el('rulesList').innerHTML = `
+    <p><b>Idaho (state):</b> No wake within 100 ft of a dock, a swimmer or other person in the
+       water — any vessel. Wake-surfing mode must also stay 100 ft from other boats, docks, and
+       swimmers, and any powered craft passing another keeps 100 ft of separation.</p>
+    <p><b>Kootenai County:</b> No skiing, towing, or surfing within 150 ft of shore, docks, piers,
+       or other structures in the water (log booms count as structures).</p>
+    <p><b>WSIA guideline</b> (not law): wake surf at least 200 ft from shore, docks, piers, and
+       structures — "make it in the middle."</p>
+    ${zones}
+    <p><b>How this map applies them:</b> swimmers and moving boats can't be mapped, so the fixed
+       part of each rule is drawn from the shoreline and (where the toggle is on) every dock.
+       Click any point on the map for a rule-by-rule check at that spot. Not legal advice; rule
+       wording per HLWID — official citations pending.</p>`;
+}
 function buildLegend(){
-  const dockOn = !!DIST_DOCKS;
+  const dockOn = !!DIST_DOCKS || !!(MANUAL && MANUAL.length);
   el('legend').innerHTML =
     (LAKE.has_depth ? sw('#0c3760','deep') : sw('#0a6e78','far from shore')) +
     sw('#c8860a','qualifying') + sw('#c5433f','straight run') +
     (NOWAKE && el('nowake').checked ? sw('#781a2e','designated no-wake') : '') +
     (CAUTION ? sw('#e6be28','caution') : '') +
-    (dockOn ? '<span><span class="sw dot" style="background:#ff3c3c"></span>dock</span>' : '');
+    (dockOn ? `<span><span class="sw dot" style="background:${MANUAL?'#2eceff':'#ff3c3c'}"></span>dock${MANUAL?' (edited)':''}</span>` : '');
 }
 function sw(color,label){ return `<span><span class="sw" style="background:${color}"></span>${label}</span>`; }
 
@@ -745,9 +1069,26 @@ async function init(){
   });
   el('copyLink').onclick=copyLink; el('dlPng').onclick=exportPng; el('dlGeo').onclick=exportGeoJson;
   el('dlKml').onclick=exportKml; el('dlGpx').onclick=exportGpx;
+  el('dkExport').onclick=exportDocks; el('dkReset').onclick=resetDocks; el('dkClear').onclick=clearDocks;
+  el('dlPrint').onclick=printMap;
+  el('locBtn').onclick=toggleGps;
+  el('editMode').addEventListener('change', ()=>{
+    if(!LAKE){ el('editMode').checked=false; return; }
+    const on=el('editMode').checked;
+    el('c').parentElement.classList.toggle('editing', on);
+    if(on && !MANUAL){ MANUAL=(LAKE.docks||[]).map(d=>d.slice());
+      rebuildCustomDist(); saveManual();
+      el('docks').disabled=false; el('docks').checked=true;
+      editFlash('editing a copy of the detected docks — click to add or remove');
+    }
+    refreshDockUI(); compute();
+  });
   const cv=el('c');
   cv.addEventListener('mousemove', inspect);
   cv.addEventListener('mouseleave', ()=>el('tip').classList.remove('on'));
+  cv.addEventListener('click', e=>{ if(!LAKE) return;
+    if(el('editMode').checked) dockClick(e); else pinClick(e); });
+  if('serviceWorker' in navigator){ try{ navigator.serviceWorker.register('./sw.js'); }catch(_){} }
 
   const st=readHash();
   const first = (st && man.some(m=>m.slug===st.lake)) ? st.lake : man[0].slug;

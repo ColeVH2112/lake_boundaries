@@ -87,6 +87,13 @@ def _pack_int16(arr: np.ndarray) -> str:
     return base64.b64encode(out.astype("<i2").tobytes()).decode("ascii")
 
 
+def _dock_file(slug: str):
+    """Hand-edited dock sets (exported from the site's dock editor and committed
+    as <slug>_manual.geojson) take precedence over the CV extraction."""
+    manual = DOCKS_DIR / f"{slug}_manual.geojson"
+    return manual if manual.exists() else DOCKS_DIR / f"{slug}_cv.geojson"
+
+
 def _dock_field(poly, slug, native_cell, factor, hh, ww):
     """Dock-aware distance field aligned to the exported grid, plus the deduped
     dock points (UTM). Returns (packed Int16 base64, deduped dock GeoDataFrame)."""
@@ -95,7 +102,7 @@ def _dock_field(poly, slug, native_cell, factor, hh, ww):
     from .zones import distance_from_shore_m
 
     mask, tr = build_mask_raster(poly, native_cell)
-    docks = _dedupe_points(gpd.read_file(DOCKS_DIR / f"{slug}_cv.geojson").to_crs(CRS_UTM))
+    docks = _dedupe_points(gpd.read_file(_dock_file(slug)).to_crs(CRS_UTM))
     mask_d = burn_docks(mask, docks.geometry.values, tr, width_m=6.0)
     d = distance_from_shore_m(mask_d, native_cell)
     if slug in EDGE_CORRECTED:
@@ -228,9 +235,11 @@ def export_lake(slug: str, wb=None) -> dict | None:
         "depth_ft": depth_b64,
     }
 
+    payload["edge_corrected"] = slug in EDGE_CORRECTED
+
     has_docks = False
     n_docks = 0
-    if poly is not None and (DOCKS_DIR / f"{slug}_cv.geojson").exists():
+    if poly is not None and _dock_file(slug).exists():
         payload["dist_m_docks"], docks = _dock_field(poly, slug, native_cell, factor, hh, ww)
         px = [[int(round((p.x - west) / web_cell)), int(round((north - p.y) / web_cell))]
               for p in docks.geometry]

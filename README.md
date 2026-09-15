@@ -74,6 +74,16 @@ with an on-map overlay and toggle; display-only caution areas
 (`<slug>_caution.geojson`); and KML + GPX downloads of the current zone outline
 for Google Earth / My Maps / chartplotters.
 
+On-water and editing features: a **dock editor** on every water (click the map
+to add/remove docks; an exact in-browser distance transform recomputes the
+dock-aware setback live; edits persist in the browser and export as
+`<slug>_manual.geojson`, which the exporter prefers over the CV set on the next
+build); **live GPS** with a feet-to-shore readout and a green/red legality
+banner against the current settings; a **click-anywhere rules readout**
+(rule-by-rule ✓/✗ at any point) plus a per-water "Boating rules here" panel;
+and the site is an **installable PWA** — waters you open are cached for
+offline use on the water.
+
 Outputs land in `out/<lake_slug>/`:
 
 | file | contents |
