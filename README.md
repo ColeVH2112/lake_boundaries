@@ -27,7 +27,7 @@ including which lakes have *no* open depth data (Hayden, Spirit, Twin, Hauser).
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/python scripts/fetch_data.py          # ~140 MB of public data
+.venv/bin/python scripts/fetch_data.py          # ~240 MB of public data
 .venv/bin/python -m lakezones list-lakes        # what's analyzable
 .venv/bin/python -m lakezones run --all-covered # default 20ft/500ft/3000ft
 .venv/bin/python -m lakezones run --lake "Coeur d'Alene Lake" \
@@ -88,7 +88,8 @@ Outputs land in `out/<lake_slug>/`:
 
 | file | contents |
 |---|---|
-| `depth_ft_10m.tif` | interpolated depth raster (ft, 10 m cells, EPSG:26911) |
+| `distance_m_10m.tif` | distance-from-shore raster (m) — always written; the web export reads it |
+| `depth_ft_10m.tif` | interpolated depth raster (ft, 10 m cells, EPSG:26911) — only where a depth source exists |
 | `zones_qualifying.geojson` | areas meeting the depth + shore-distance criteria |
 | `zones_runs.geojson` | subset also lying on a qualifying straight run |
 | `stats.json` | acreages, max depth, run count |

@@ -15,16 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw"
 
-# HUC8 subbasins intersecting Kootenai County (verified against TIGERweb county polygon)
-HUC8S = [
-    "17010214",  # Pend Oreille Lake (Spirit, Twin Lakes)
-    "17010301",  # Upper Coeur d'Alene
-    "17010302",  # South Fork Coeur d'Alene
-    "17010303",  # Coeur d'Alene Lake (CdA, chain lakes, Fernan)
-    "17010304",  # St. Joe
-    "17010305",  # Upper Spokane (Hauser, Hayden side)
-    "17010306",  # Hangman
-]
+# single source of truth for basin coverage lives in the package config
+sys.path.insert(0, str(ROOT / "src"))
+from lakezones.config import HUC8S  # noqa: E402
 
 NHD_URL = (
     "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/HU8/GPKG/"

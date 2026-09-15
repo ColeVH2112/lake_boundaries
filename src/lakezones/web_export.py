@@ -13,19 +13,20 @@ inspect points, and draw docks.
 from __future__ import annotations
 
 import base64
+import bisect
+import gzip
 import json
 import math
 import time
 import urllib.request
-from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import rasterio
 from pyproj import Transformer
 
-from .config import ACRES_PER_M2, CRS_UTM, M_PER_FT, OUT_DIR, PROJECT_ROOT
-from .lakes import DISSOLVE_TOUCHING, slugify
+from .config import ACRES_PER_M2, CRS_UTM, DOCK_WIDTH_M, M_PER_FT, OUT_DIR, PROJECT_ROOT
+from .lakes import DISSOLVE_TOUCHING
 
 DOCS = PROJECT_ROOT / "docs"
 WEB_DATA = DOCS / "data"
@@ -60,12 +61,16 @@ IMAGERY_URL = (
 
 
 def _dedupe_points(gdf: gpd.GeoDataFrame, radius_m: float = 12.0) -> gpd.GeoDataFrame:
-    """Greedy spatial de-dup: collapse multiple detections of one physical dock."""
+    """Greedy spatial de-dup: collapse multiple detections of one physical dock.
+    Points are swept in x order, so only kept points within radius_m in x can
+    conflict — a bisect window keeps the greedy result identical but O(n log n)."""
     pts = [g for g in gdf.geometry if g.geom_type == "Point"]
-    kept = []
+    kept, kx = [], []
     for p in sorted(pts, key=lambda g: (g.x, g.y)):
-        if all(p.distance(k) > radius_m for k in kept):
+        lo = bisect.bisect_left(kx, p.x - radius_m)
+        if all(p.distance(k) > radius_m for k in kept[lo:]):
             kept.append(p)
+            kx.append(p.x)
     return gpd.GeoDataFrame(geometry=kept, crs=gdf.crs)
 
 
@@ -82,9 +87,41 @@ def _downsample(arr: np.ndarray, factor: int) -> np.ndarray:
         return np.nanmean(blocks, axis=(1, 3))
 
 
+def _int16_grid(arr: np.ndarray) -> np.ndarray:
+    return np.where(np.isfinite(arr), np.round(arr), SENTINEL).astype("<i2")
+
+
+def _b64(a: np.ndarray) -> str:
+    return base64.b64encode(a.astype("<i2").tobytes()).decode("ascii")
+
+
+def _rowdelta(a: np.ndarray) -> np.ndarray:
+    """Per-row first differences with int16 wraparound — the JS decoder's
+    Int16Array cumulative sum reconstructs this bit-exactly."""
+    d = a.astype(np.int32).copy()
+    d[:, 1:] = d[:, 1:] - d[:, :-1]
+    return d.astype("<i2")
+
+
+def _gz(s: str) -> int:
+    return len(gzip.compress(s.encode("ascii"), 9))
+
+
+def _pack_best(grid: np.ndarray):
+    """Pack an Int16 grid as plain or row-delta, whichever gzips smaller (the
+    wire format — GitHub Pages gzips JSON). Returns (b64, enc-or-None)."""
+    plain = _b64(grid)
+    rd = _b64(_rowdelta(grid))
+    return (rd, "rowdelta") if _gz(rd) < _gz(plain) else (plain, None)
+
+
+def _pack_bits(mask: np.ndarray) -> str:
+    """0/1 masks ship 1-bit packed: 16x smaller cached/parsed than Int16."""
+    return base64.b64encode(np.packbits(mask.flatten()).tobytes()).decode("ascii")
+
+
 def _pack_int16(arr: np.ndarray) -> str:
-    out = np.where(np.isfinite(arr), np.round(arr), SENTINEL)
-    return base64.b64encode(out.astype("<i2").tobytes()).decode("ascii")
+    return _b64(_int16_grid(arr))
 
 
 def _dock_file(slug: str):
@@ -103,13 +140,13 @@ def _dock_field(poly, slug, native_cell, factor, hh, ww):
 
     mask, tr = build_mask_raster(poly, native_cell)
     docks = _dedupe_points(gpd.read_file(_dock_file(slug)).to_crs(CRS_UTM))
-    mask_d = burn_docks(mask, docks.geometry.values, tr, width_m=6.0)
+    mask_d = burn_docks(mask, docks.geometry.values, tr, width_m=DOCK_WIDTH_M)
     d = distance_from_shore_m(mask_d, native_cell)
     if slug in EDGE_CORRECTED:
         d = np.maximum(d - native_cell / 2, 0.0)
     arr = np.where(mask, d, np.nan)
     ds = _downsample(arr, factor)[:hh, :ww]
-    return _pack_int16(ds), docks
+    return _int16_grid(ds), docks
 
 
 def _zone_layer(slug, kind, west, north, web_cell, hh, ww):
@@ -132,7 +169,7 @@ def _zone_layer(slug, kind, west, north, web_cell, hh, ww):
     raw = zones["name"] if "name" in zones.columns else [None] * len(zones)
     names = [str(n) if n and str(n) != "nan" else f"zone {i + 1}"
              for i, n in enumerate(raw)]
-    return _pack_int16(m.astype(float)), names
+    return _pack_bits(m), names
 
 
 def _fetch_basemap(slug, west, south, east, north, ww, hh, retries=5) -> bool:
@@ -146,15 +183,21 @@ def _fetch_basemap(slug, west, south, east, north, ww, hh, retries=5) -> bool:
     iw, ih = max(1, round(ww * scale)), max(1, round(hh * scale))
     url = IMAGERY_URL.format(w=west, s=south, e=east, n=north, iw=iw, ih=ih)
     out.parent.mkdir(parents=True, exist_ok=True)
+    last = None
     for attempt in range(retries):
         try:
             urllib.request.urlretrieve(url, out)
             if out.stat().st_size > 10000:
+                # the ArcGIS endpoint ignores compressionQuality; re-encode at
+                # q85+optimize (-16% bytes, PSNR ~40 dB — imagery is 80% of wire)
+                from PIL import Image
+                Image.open(out).convert("RGB").save(out, "JPEG", quality=85, optimize=True)
                 return True
-        except Exception:  # noqa: BLE001 - transient imagery-server errors
-            pass
-        time.sleep(2 * (attempt + 1))
-    print(f"  ! basemap fetch failed for {slug}")
+        except Exception as e:  # noqa: BLE001 - transient imagery-server errors
+            last = e
+        if attempt < retries - 1:
+            time.sleep(2 * (attempt + 1))
+    print(f"  ! basemap fetch failed for {slug}: {last}")
     return False
 
 
@@ -203,18 +246,27 @@ def export_lake(slug: str, wb=None) -> dict | None:
     elif wb is not None:
         try:
             poly = get_lake_polygon(wb, name, dissolve_touching=name in DISSOLVE_TOUCHING)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! could not resolve NHD polygon for {name!r}: {e} — "
+                  "exporting without shoreline/docks")
             poly = None
     if poly is not None:
         shoreline_ft = round(poly.length / M_PER_FT, 0)
 
     depth_tifs = sorted(outdir.glob("depth_ft_*.tif"))
     has_depth = bool(depth_tifs)
+    enc = {}   # per-key wire encodings the frontend must undo (absent = plain)
+    dist_i16 = _int16_grid(dist_ds)
+    dist_b64, e = _pack_best(dist_i16)
+    if e:
+        enc["dist_m"] = e
     depth_b64 = None
     if has_depth:
         with rasterio.open(depth_tifs[0]) as src:
             depth_ds = _downsample(src.read(1), factor)[:hh, :ww]
-        depth_b64 = _pack_int16(depth_ds)
+        depth_b64, e = _pack_best(_int16_grid(depth_ds))
+        if e:
+            enc["depth_ft"] = e
 
     payload = {
         "name": name,
@@ -231,7 +283,7 @@ def export_lake(slug: str, wb=None) -> dict | None:
         # native max depth from stats (downsampling would lose the deepest cells)
         "max_depth_ft": stats.get("max_depth_ft"),
         "acre_per_cell": web_cell * web_cell * ACRES_PER_M2,
-        "dist_m": _pack_int16(dist_ds),
+        "dist_m": dist_b64,
         "depth_ft": depth_b64,
     }
 
@@ -240,8 +292,19 @@ def export_lake(slug: str, wb=None) -> dict | None:
     has_docks = False
     n_docks = 0
     if poly is not None and _dock_file(slug).exists():
-        payload["dist_m_docks"], docks = _dock_field(poly, slug, native_cell, factor, hh, ww)
-        px = [[int(round((p.x - west) / web_cell)), int(round((north - p.y) / web_cell))]
+        docks_i16, docks = _dock_field(poly, slug, native_cell, factor, hh, ww)
+        # dock field differs from dist_m on few cells -> ship the difference,
+        # optionally row-delta'd on top, whichever gzips smallest
+        delta = (docks_i16.astype(np.int32) - dist_i16.astype(np.int32)).astype("<i2")
+        cands = {None: _b64(docks_i16), "delta": _b64(delta),
+                 "delta+rowdelta": _b64(_rowdelta(delta))}
+        key = min(cands, key=lambda k: _gz(cands[k]))
+        payload["dist_m_docks"] = cands[key]
+        if key:
+            enc["dist_m_docks"] = key
+        # cell index = floor, not round: round() put 3/4 of dock dots in the
+        # neighboring cell (a systematic half-cell bias in the editor seed too)
+        px = [[math.floor((p.x - west) / web_cell), math.floor((north - p.y) / web_cell)]
               for p in docks.geometry]
         payload["docks"] = [[c, r] for c, r in px if 0 <= c < ww and 0 <= r < hh]
         n_docks = len(docks)
@@ -254,7 +317,9 @@ def export_lake(slug: str, wb=None) -> dict | None:
         z = _zone_layer(slug, kind, west, north, web_cell, hh, ww)
         if z is not None:
             payload[key], payload[f"{key}_names"] = z
+            enc[key] = "bits"
             n_zones += len(z[1])
+    payload["enc"] = enc
 
     has_imagery = _fetch_basemap(slug, west, south, east, north, ww, hh)
     payload["imagery"] = f"{slug}_imagery.jpg" if has_imagery else None

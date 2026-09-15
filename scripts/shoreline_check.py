@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import time
 import urllib.request
 from pathlib import Path
 
@@ -35,13 +36,22 @@ IMAGERY = (
 RING_COLORS = ["#3bd16f", "#e5484d", "#ffa94d", "#845ef7"]
 
 
-def fetch_imagery(bbox, w, h, cache: Path) -> Path:
+def fetch_imagery(bbox, w, h, cache: Path, retries: int = 5) -> Path:
     if cache.exists() and cache.stat().st_size > 10000:
         return cache
     cache.parent.mkdir(parents=True, exist_ok=True)
     url = IMAGERY.format(minx=bbox[0], miny=bbox[1], maxx=bbox[2], maxy=bbox[3], w=w, h=h)
-    urllib.request.urlretrieve(url, cache)
-    return cache
+    last = None
+    for attempt in range(retries):  # the imagery server 504s intermittently
+        try:
+            urllib.request.urlretrieve(url, cache)
+            if cache.stat().st_size > 10000:
+                return cache
+        except Exception as e:  # noqa: BLE001
+            last = e
+        if attempt < retries - 1:
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"imagery fetch failed after {retries} tries: {last}")
 
 
 def draw_rings(ax, geom, color, label):

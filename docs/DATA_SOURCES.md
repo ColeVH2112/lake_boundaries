@@ -15,6 +15,16 @@ live at survey time.
 | Spirit Lake | 1,535 | ~100 ft | ❌ none |
 | Upper / Lower Twin | 526 / 390 | ~20 / ~60 ft | ❌ none |
 | Hauser Lake | 539 | 40 ft | ❌ none |
+| Cocolalla Lake (Bonner Co.) | 815 | ~40 ft | ❌ none — geometry-only |
+| Spokane River, 95 Bridge → Post Falls Dam | 666 | — | ❌ none — geometry-only; outline from **USGS 3DHP (2023)**, matching the HLWID ArcGIS model |
+| Spokane River, Post Falls → state line | 170 | — | ❌ none — geometry-only; outline clipped from NHD HR |
+
+**Aerial imagery**: basemaps and CV dock extraction use the Esri World Imagery
+export service (© Esri and contributors; check Esri terms before commercial
+redistribution). **Shoreline lineage**: lake outlines are USGS NHD High
+Resolution; the upper Spokane reach uses the USGS 3DHP (2023) delineation —
+NHD's successor — which runs slightly narrower than NHD HR on that reach
+(665.9 vs 766.4 ac). Both are US-government public domain.
 
 ## Primary datasets (used by the pipeline)
 

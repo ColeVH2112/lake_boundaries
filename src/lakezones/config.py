@@ -16,6 +16,9 @@ FULL_POOL_ELEV_FT = 2128.0
 
 M_PER_FT = 0.3048
 ACRES_PER_M2 = 1.0 / 4046.8564224
+# rasterized dock footprint (dock + wet perimeter at ~10 m cells) — one value
+# shared by the CLI run and the web export so their setbacks agree
+DOCK_WIDTH_M = 6.0
 
 # HUC8 subbasins intersecting Kootenai County (verified via TIGERweb county polygon).
 HUC8S = [

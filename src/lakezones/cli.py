@@ -16,7 +16,7 @@ import time
 
 import numpy as np
 
-from .config import ACRES_PER_M2, CRS_UTM, OUT_DIR
+from .config import ACRES_PER_M2, CRS_UTM, DOCK_WIDTH_M, OUT_DIR
 from .lakes import COVERED_LAKES, DISSOLVE_TOUCHING, slugify
 
 
@@ -232,7 +232,8 @@ def main(argv=None) -> int:
     pr.add_argument("--cell", type=float, default=10.0)
     pr.add_argument("--densify", type=float, default=None)
     pr.add_argument("--docks", help="dock geometry file (points/lines) to treat as shore")
-    pr.add_argument("--dock-width-m", type=float, default=4.0, help="rasterized dock width")
+    pr.add_argument("--dock-width-m", type=float, default=DOCK_WIDTH_M,
+                    help="rasterized dock width (same default as the web export)")
 
     pm = sub.add_parser("render", help="render map PNGs from existing outputs")
     pm.add_argument("--lake")

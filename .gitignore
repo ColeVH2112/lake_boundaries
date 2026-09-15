@@ -18,6 +18,8 @@ data/interim/
 .vscode/
 .idea/
 out/**/*_basemap.jpg
+# regenerable debug renders (lakezones render / one-off diagnostics)
+out/**/*.png
 data/interim/
 
 # large cached imagery tiles (regenerable)

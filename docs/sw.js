@@ -1,6 +1,6 @@
 // Offline support: cache-first with background refresh. Any water you open gets
 // cached (payload + imagery), so it keeps working with no signal on the lake.
-const CACHE = 'lakezones-v1';
+const CACHE = 'lakezones-v2';   // v2: payload wire encodings (rowdelta/delta/bits)
 const SHELL = ['./', './index.html', './manifest.webmanifest',
                './data/manifest.json', './data/sources.json'];
 self.addEventListener('install', e => {

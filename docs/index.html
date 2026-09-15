@@ -310,35 +310,71 @@ function b64ToI16(b64){
   for(let i=0;i<len;i++) bytes[i]=bin.charCodeAt(i);
   return new Int16Array(bytes.buffer);
 }
+function b64ToBits(b64, n){          // 1-bit packed masks (row-major, MSB first)
+  const bin = atob(b64); const out = new Uint8Array(n);
+  for(let i=0;i<n;i++) out[i] = (bin.charCodeAt(i>>3) >> (7-(i&7))) & 1;
+  return out;
+}
+// undo the payload's wire encoding (see web_export._pack_best): row-delta rasters
+// are per-row prefix-summed (Int16Array stores wrap mod 2^16, matching numpy int16),
+// and dist_m_docks may be shipped as a difference from dist_m
+function decodeField(key){
+  const e = (LAKE.enc || {})[key] || '';
+  if(e === 'bits') return b64ToBits(LAKE[key], LAKE.width*LAKE.height);
+  const a = b64ToI16(LAKE[key]);
+  if(e === 'rowdelta' || e === 'delta+rowdelta'){
+    const w = LAKE.width;
+    for(let r=0;r<LAKE.height;r++){ const o=r*w;
+      for(let x=1;x<w;x++) a[o+x] = a[o+x] + a[o+x-1];
+    }
+  }
+  if(e === 'delta' || e === 'delta+rowdelta'){   // dist_m_docks: difference from dist_m
+    for(let i=0;i<a.length;i++) a[i] = a[i] + DIST[i];
+  }
+  return a;
+}
 
-// ---- color ramps -------------------------------------------------------
 function lerp(a,b,t){ return a+(b-a)*t; }
-function rampDepth(v,max){           // white -> deep blue
-  const t = Math.max(0,Math.min(1, v/Math.max(10,max)));
-  return [Math.round(lerp(235,12,t)), Math.round(lerp(244,55,t)), Math.round(lerp(250,90,t))];
-}
-function rampDist(v,max){            // pale -> teal (distance ft)
-  const t = Math.max(0,Math.min(1, v/Math.max(300,max)));
-  return [Math.round(lerp(232,10,t)), Math.round(lerp(243,110,t)), Math.round(lerp(233,120,t))];
-}
 
 // ---- straight-run: rotate / 1-D opening / rotate back ------------------
 function rotateNN(src, side, cx, cy, cos, sin, into){
   into.fill(0);
-  for(let y=0;y<side;y++){ const dy=y-cy;
-    for(let x=0;x<side;x++){ const dx=x-cx;
-      const sx=Math.round(cx+dx*cos+dy*sin), sy=Math.round(cy-dx*sin+dy*cos);
-      if(sx>=0&&sx<side&&sy>=0&&sy<side) into[y*side+x]=src[sy*side+sx];
-    }}
+  if(side > 2047){ // fixed-point (20-bit) would overflow int32 — exact fallback
+    for(let y=0;y<side;y++){ const dy=y-cy;
+      for(let x=0;x<side;x++){ const dx=x-cx;
+        const sx=Math.round(cx+dx*cos+dy*sin), sy=Math.round(cy-dx*sin+dy*cos);
+        if(sx>=0&&sx<side&&sy>=0&&sy<side) into[y*side+x]=src[sy*side+sx];
+      }}
+    return;
+  }
+  // incremental fixed-point: sx(x) = (cx - cx*cos + dy*sin) + x*cos, stepped by
+  // cosFP per pixel; +HALF then >>20 is Math.round to within 2^-20 of cos/sin
+  const SC=1048576, cosFP=Math.round(cos*SC), sinFP=Math.round(sin*SC), HALF=SC>>1;
+  for(let y=0;y<side;y++){ const dy=y-cy, o=y*side;
+    let sxFP=Math.round((cx-cx*cos+dy*sin)*SC)+HALF;
+    let syFP=Math.round((cy+cx*sin+dy*cos)*SC)+HALF;
+    for(let x=0;x<side;x++){
+      const sx=sxFP>>20, sy=syFP>>20;
+      if(sx>=0&&sx<side&&sy>=0&&sy<side) into[o+x]=src[sy*side+sx];
+      sxFP+=cosFP; syFP-=sinFP;
+    }
+  }
 }
-function open1d(buf, side, n){
-  if(n<=1) return;
-  const tmp=new Uint8Array(side*side);
+// 1-D opening along rows; also returns the longest run seen (so the caller
+// gets the longest-straight-run stat for free instead of a second sweep)
+function open1d(buf, side, n, tmp){
+  let best=0;
+  if(n<=1){
+    for(let y=0;y<side;y++){ const o=y*side; let run=0;
+      for(let x=0;x<side;x++){ run=buf[o+x]?run+1:0; if(run>best) best=run; } }
+    return best;
+  }
   for(let y=0;y<side;y++){ const o=y*side; let run=0;
-    for(let x=0;x<side;x++){ run=buf[o+x]?run+1:0; tmp[o+x]=run>=n?1:0; }
+    for(let x=0;x<side;x++){ run=buf[o+x]?run+1:0; if(run>best) best=run; tmp[o+x]=run>=n?1:0; }
     for(let x=0;x<side;x++) buf[o+x]=0;
     for(let x=side-1;x>=0;x--){ if(tmp[o+x]){ for(let k=0;k<n;k++){ if(x-k>=0) buf[o+x-k]=1; } } }
   }
+  return best;
 }
 function padSquare(qual, w, h){
   const side=Math.ceil(Math.hypot(w,h))+2, x0=Math.floor((side-w)/2), y0=Math.floor((side-h)/2);
@@ -346,35 +382,28 @@ function padSquare(qual, w, h){
   for(let y=0;y<h;y++) for(let x=0;x<w;x++) canvas[(y+y0)*side+(x+x0)]=qual[y*w+x];
   return {canvas, side, x0, y0};
 }
+// one rotation sweep does both jobs: the run-mask opening AND the longest-run
+// stat (pass runPx=1 for stat-only — the mask is then just qual itself)
 function straightRun(qual, w, h, runPx, angleStep){
-  if(runPx<=1) return qual.slice();
   const {canvas, side, x0, y0}=padSquare(qual,w,h);
   const cx=(side-1)/2, cy=(side-1)/2;
-  const rot=new Uint8Array(side*side), back=new Uint8Array(side*side), acc=new Uint8Array(side*side);
+  const morph = runPx>1;
+  const rot=new Uint8Array(side*side), tmp=new Uint8Array(side*side);
+  const back=morph?new Uint8Array(side*side):null, acc=morph?new Uint8Array(side*side):null;
+  let bestPx=0, bestDeg=0;
   for(let a=0;a<180;a+=angleStep){ const r=a*Math.PI/180, cos=Math.cos(r), sin=Math.sin(r);
     if(a===0) rot.set(canvas); else rotateNN(canvas,side,cx,cy,cos,sin,rot);
-    open1d(rot, side, runPx);
+    const b=open1d(rot, side, morph?runPx:1, tmp);
+    if(b>bestPx){ bestPx=b; bestDeg=a; }
+    if(!morph) continue;
     if(a===0){ for(let i=0;i<acc.length;i++) acc[i]|=rot[i]; }
     else { rotateNN(rot,side,cx,cy,Math.cos(-r),Math.sin(-r),back);
            for(let i=0;i<acc.length;i++) acc[i]|=back[i]; }
   }
   const out=new Uint8Array(w*h);
-  for(let y=0;y<h;y++) for(let x=0;x<w;x++) out[y*w+x]=(acc[(y+y0)*side+(x+x0)]&&qual[y*w+x])?1:0;
-  return out;
-}
-// longest straight all-qualifying segment across headings -> {ft, deg}
-function longestRun(qual, w, h, angleStep){
-  const {canvas, side, x0, y0}=padSquare(qual,w,h);
-  const cx=(side-1)/2, cy=(side-1)/2;
-  const rot=new Uint8Array(side*side);
-  let bestPx=0, bestDeg=0;
-  for(let a=0;a<180;a+=angleStep){ const r=a*Math.PI/180;
-    if(a===0) rot.set(canvas); else rotateNN(canvas,side,cx,cy,Math.cos(r),Math.sin(r),rot);
-    for(let y=0;y<side;y++){ const o=y*side; let run=0;
-      for(let x=0;x<side;x++){ run=rot[o+x]?run+1:0; if(run>bestPx){ bestPx=run; bestDeg=a; } }
-    }
-  }
-  return { ft: bestPx*LAKE.cell_m/FT, deg: bestDeg };
+  if(!morph) out.set(qual);
+  else for(let y=0;y<h;y++) for(let x=0;x<w;x++) out[y*w+x]=(acc[(y+y0)*side+(x+x0)]&&qual[y*w+x])?1:0;
+  return { out, ft: bestPx*LAKE.cell_m/FT, deg: bestDeg };
 }
 function countComponents(mask, w, h){
   const seen=new Uint8Array(w*h); let n=0; const stack=[];
@@ -416,13 +445,13 @@ function compute(){
   el('busy').classList.add('on');
   clearTimeout(runTimer);
   runTimer=setTimeout(()=>{
-    const runs = runFt<=0 ? qual : straightRun(qual, w, h, runPx, 15);
+    const res = straightRun(qual, w, h, runFt<=0 ? 1 : runPx, 15);
+    const runs = res.out;
     RUNS=runs;
     paint(qual, runs);
     el('rAc').textContent=fmt(countAcres(runs));
     el('zoneN').textContent=countComponents(runs, w, h);
-    const lr=longestRun(qual, w, h, 15);
-    el('longRun').textContent = lr.ft>=5280 ? (lr.ft/5280).toFixed(1)+' mi' : Math.round(lr.ft).toLocaleString()+' ft';
+    el('longRun').textContent = res.ft>=5280 ? (res.ft/5280).toFixed(1)+' mi' : Math.round(res.ft).toLocaleString()+' ft';
     el('busy').classList.remove('on');
     updateHash();
   }, 30);
@@ -436,24 +465,30 @@ function zoneCanvas(qual, runs){
   const off=document.createElement('canvas'); off.width=w; off.height=h;
   const ctx=off.getContext('2d'); const img=ctx.createImageData(w,h); const px=img.data;
   const overImg = !!BASEMAP;
-  const maxDepth=LAKE.max_depth_ft||60; const D=curDist();
+  const maxDepth=Math.max(10, LAKE.max_depth_ft||60); const D=curDist();
   let maxDist=0; for(let i=0;i<D.length;i++) if(MASK[i] && D[i]>maxDist) maxDist=D[i];
-  const maxDistFt=maxDist/FT;
-  const nwOn = NOWAKE && el('nowake').checked;
+  const distDen=Math.max(300*FT, maxDist);
+  const nwOn = NOWAKE && el('nowake').checked, hasDepth = LAKE.has_depth;
+  // branch-first constant colors, no per-pixel allocations (this loop runs on
+  // every slider tick); precedence: no-wake > caution > runs > qual > ramp
+  const aBase=overImg?95:255, aQ=overImg?150:255, aR=overImg?170:255,
+        aC=overImg?120:220, aN=overImg?150:255;
   for(let i=0;i<w*h;i++){ const o=i*4;
     if(!MASK[i]){ px[o+3]=0; continue; }
-    let c = LAKE.has_depth ? rampDepth(DEPTH[i], maxDepth) : rampDist(D[i]/FT, maxDistFt);
-    let a = overImg ? 95 : 255;
-    if(qual && qual[i]){ c=[200,134,10]; a=overImg?150:255; if(!overImg) c=[mix(c[0],200),mix(c[1],134),mix(c[2],10)]; }
-    if(runs && runs[i]){ c=[197,67,63]; a=overImg?170:255; if(!overImg) c=[mix(197,197),mix(67,67),mix(63,63)]; }
-    if(CAUTION && CAUTION[i]){ c=[230,190,40]; a=overImg?120:220; }        // caution: advisory only
-    if(nwOn && NOWAKE[i]){ c=[120,26,46]; a=overImg?150:255; }             // designated no-wake
-    px[o]=c[0]; px[o+1]=c[1]; px[o+2]=c[2]; px[o+3]=a;
+    if(nwOn && NOWAKE[i]){ px[o]=120; px[o+1]=26; px[o+2]=46; px[o+3]=aN; continue; }
+    if(CAUTION && CAUTION[i]){ px[o]=230; px[o+1]=190; px[o+2]=40; px[o+3]=aC; continue; }
+    if(runs && runs[i]){ px[o]=197; px[o+1]=67; px[o+2]=63; px[o+3]=aR; continue; }
+    if(qual && qual[i]){ px[o]=200; px[o+1]=134; px[o+2]=10; px[o+3]=aQ; continue; }
+    if(hasDepth){ const t=Math.max(0,Math.min(1, DEPTH[i]/maxDepth));      // white -> deep blue
+      px[o]=Math.round(235-223*t); px[o+1]=Math.round(244-189*t); px[o+2]=Math.round(250-160*t);
+    } else { const t=Math.max(0,Math.min(1, D[i]/distDen));                // pale -> teal
+      px[o]=Math.round(232-222*t); px[o+1]=Math.round(243-133*t); px[o+2]=Math.round(233-113*t);
+    }
+    px[o+3]=aBase;
   }
   ctx.putImageData(img,0,0);
   return off;
 }
-function mix(base,tint){ return Math.round(base*0.35 + tint*0.65); }
 
 function paint(qual, runs){
   const w=LAKE.width, h=LAKE.height, cv=el('c');
@@ -949,13 +984,13 @@ async function loadLake(slug){
   }
   if(tok!==loadSeq) return;
   LAKE = data;
-  DIST = b64ToI16(LAKE.dist_m);
+  DIST = decodeField('dist_m');
   MASK = new Uint8Array(DIST.length);
   for(let i=0;i<DIST.length;i++) MASK[i] = DIST[i]!==SENT ? 1 : 0;
-  DEPTH = LAKE.has_depth ? b64ToI16(LAKE.depth_ft) : null;
-  DIST_DOCKS = LAKE.dist_m_docks ? b64ToI16(LAKE.dist_m_docks) : null;
-  NOWAKE = LAKE.no_wake ? b64ToI16(LAKE.no_wake) : null;
-  CAUTION = LAKE.caution ? b64ToI16(LAKE.caution) : null;
+  DEPTH = LAKE.has_depth ? decodeField('depth_ft') : null;
+  DIST_DOCKS = LAKE.dist_m_docks ? decodeField('dist_m_docks') : null;  // needs DIST first
+  NOWAKE = LAKE.no_wake ? decodeField('no_wake') : null;
+  CAUTION = LAKE.caution ? decodeField('caution') : null;
   // reset per-water state BEFORE the (slow) basemap await, so sliders moved
   // during the load never mix the new grid with the old water's docks/pin
   PIN = null; GPS = null;   // grid coords are per-water; the next GPS fix repopulates

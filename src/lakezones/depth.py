@@ -91,7 +91,10 @@ def build_depth_raster(
     # value wins so shoreline zeros beat contours that graze the waterline
     order = np.argsort(vals)
     key = np.round(pts[order]).astype(np.int64)
-    _, idx = np.unique(key, axis=0, return_index=True)
+    # scalar-key unique is ~5x faster than axis=0 with an identical result:
+    # UTM 11N coords are positive and < 2^31, so the int64 combine can't collide
+    k = key[:, 0] * np.int64(2**32) + key[:, 1]
+    _, idx = np.unique(k, return_index=True)
     pts, vals = pts[order][idx], vals[order][idx]
 
     interp = LinearNDInterpolator(pts, vals)
