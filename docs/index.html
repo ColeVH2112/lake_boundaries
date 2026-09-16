@@ -337,28 +337,15 @@ function decodeField(key){
 function lerp(a,b,t){ return a+(b-a)*t; }
 
 // ---- straight-run: rotate / 1-D opening / rotate back ------------------
+// exact float rotation — a fixed-point variant is ~17% faster but shifts a
+// pixel at some headings, and output identity outranks that here
 function rotateNN(src, side, cx, cy, cos, sin, into){
   into.fill(0);
-  if(side > 2047){ // fixed-point (20-bit) would overflow int32 — exact fallback
-    for(let y=0;y<side;y++){ const dy=y-cy;
-      for(let x=0;x<side;x++){ const dx=x-cx;
-        const sx=Math.round(cx+dx*cos+dy*sin), sy=Math.round(cy-dx*sin+dy*cos);
-        if(sx>=0&&sx<side&&sy>=0&&sy<side) into[y*side+x]=src[sy*side+sx];
-      }}
-    return;
-  }
-  // incremental fixed-point: sx(x) = (cx - cx*cos + dy*sin) + x*cos, stepped by
-  // cosFP per pixel; +HALF then >>20 is Math.round to within 2^-20 of cos/sin
-  const SC=1048576, cosFP=Math.round(cos*SC), sinFP=Math.round(sin*SC), HALF=SC>>1;
-  for(let y=0;y<side;y++){ const dy=y-cy, o=y*side;
-    let sxFP=Math.round((cx-cx*cos+dy*sin)*SC)+HALF;
-    let syFP=Math.round((cy+cx*sin+dy*cos)*SC)+HALF;
-    for(let x=0;x<side;x++){
-      const sx=sxFP>>20, sy=syFP>>20;
-      if(sx>=0&&sx<side&&sy>=0&&sy<side) into[o+x]=src[sy*side+sx];
-      sxFP+=cosFP; syFP-=sinFP;
-    }
-  }
+  for(let y=0;y<side;y++){ const dy=y-cy;
+    for(let x=0;x<side;x++){ const dx=x-cx;
+      const sx=Math.round(cx+dx*cos+dy*sin), sy=Math.round(cy-dx*sin+dy*cos);
+      if(sx>=0&&sx<side&&sy>=0&&sy<side) into[y*side+x]=src[sy*side+sx];
+    }}
 }
 // 1-D opening along rows; also returns the longest run seen (so the caller
 // gets the longest-straight-run stat for free instead of a second sweep)
