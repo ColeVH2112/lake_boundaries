@@ -683,8 +683,14 @@ function exportPng(){
   out.toBlob(b=>download(b, `${LAKE.slug}_zones.png`));
 }
 function download(blob, fname){
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname;
-  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=fname; a.rel='noopener'; a.style.display='none';
+  // the anchor must be IN the document or Safari/Firefox silently drop the click
+  document.body.appendChild(a);
+  if(typeof a.download === 'undefined'){ window.open(url, '_blank'); }
+  else a.click();
+  setTimeout(()=>{ a.remove(); URL.revokeObjectURL(url); }, 10000);
 }
 function cornerLonLat(c,r){ const b=LAKE.bounds_lonlat, u=c/LAKE.width, v=r/LAKE.height;
   return [ +lerp(lerp(b.nw[0],b.ne[0],u), lerp(b.sw[0],b.se[0],u), v).toFixed(6),
