@@ -179,6 +179,7 @@
         <button class="act" id="locBtn">📍 My location</button>
         <span class="tsep"></span>
         <button class="act" id="dlKml" title="Zone outline for Google Earth &amp; Google My Maps">KML</button>
+        <button class="act" id="dlKmz" title="Zipped KML — best for Google Earth on your phone">KMZ</button>
         <button class="act" id="dlGpx" title="Zone outline for chartplotters &amp; navigation apps">GPX</button>
         <button class="act" id="dlPng" title="Save the map as an image">Image</button>
         <button class="act" id="dlPrint" title="One-page handout — use Save as PDF">Print</button>
@@ -215,6 +216,11 @@
             <button class="preset" data-d="300" data-z="0" data-r="0" data-k="1" title="Room to pass: 300 ft from shore leaves legal water inshore of you for a passing boat at 100 ft separation">Room to pass (300 ft)</button>
             <button class="preset" data-d="150" data-z="0" data-r="3000" data-k="1" title="The bottom line for towing: 150 ft from shore, docks, and structures, with a straight run of at least 3,000 ft">Bottom line (150 + 3,000 ft run)</button>
           </div>
+          <label class="row" style="flex-direction:row; align-items:center; gap:.55rem; margin-top:.55rem;">
+            <input type="checkbox" id="bands" style="width:1.1rem; height:1.1rem; accent-color:var(--accent);" />
+            <span class="lab" style="display:block"><span>show all rule bands at once</span>
+              <span class="muted" style="display:block; font-size:.72rem;">every rule's zone in one map, like the printed ArcGIS layout</span></span>
+          </label>
           <div class="sectlab" style="margin-top:.6rem;">Quick presets</div>
           <div style="display:flex; gap:.4rem; flex-wrap:wrap;">
             <button class="preset" data-d="300" data-z="0" data-r="0">Idaho no-wake (300 ft)</button>
@@ -483,14 +489,26 @@ function zoneCanvas(qual, runs){
   let maxDist=0; for(let i=0;i<D.length;i++) if(MASK[i] && D[i]>maxDist) maxDist=D[i];
   const distDen=Math.max(300*FT, maxDist);
   const nwOn = NOWAKE && el('nowake').checked, hasDepth = LAKE.has_depth;
+  const bandsOn = el('bands').checked;
   // branch-first constant colors, no per-pixel allocations (this loop runs on
-  // every slider tick); precedence: no-wake > caution > runs > qual > ramp
+  // every slider tick); precedence: no-wake > caution > bands|runs|qual > ramp
   const aBase=overImg?95:255, aQ=overImg?150:255, aR=overImg?170:255,
-        aC=overImg?120:220, aN=overImg?150:255;
+        aC=overImg?120:220, aN=overImg?150:255, aB=overImg?135:255;
+  // rule bands (ft), shore/dock outward — mirrors the HLWID ArcGIS layout
+  const b100=100*FT, b150=150*FT, b200=200*FT, b300=300*FT;
   for(let i=0;i<w*h;i++){ const o=i*4;
     if(!MASK[i]){ px[o+3]=0; continue; }
     if(nwOn && NOWAKE[i]){ px[o]=120; px[o+1]=26; px[o+2]=46; px[o+3]=aN; continue; }
     if(CAUTION && CAUTION[i]){ px[o]=230; px[o+1]=190; px[o+2]=40; px[o+3]=aC; continue; }
+    if(bandsOn){
+      const d=D[i];
+      if(d<b100){ px[o]=210; px[o+1]=70; px[o+2]=70; }        // no wake (state 100)
+      else if(d<b150){ px[o]=235; px[o+1]=150; px[o+2]=50; }  // no tow (county 150)
+      else if(d<b200){ px[o]=240; px[o+1]=214; px[o+2]=96; }  // tow OK, below WSIA guide
+      else if(d<b300){ px[o]=124; px[o+1]=82; px[o+2]=205; }  // WSIA surf OK (200+)
+      else { px[o]=58; px[o+1]=199; px[o+2]=222; }            // room to pass (300+)
+      px[o+3]=aB; continue;
+    }
     if(runs && runs[i]){ px[o]=197; px[o+1]=67; px[o+2]=63; px[o+3]=aR; continue; }
     if(qual && qual[i]){ px[o]=200; px[o+1]=134; px[o+2]=10; px[o+3]=aQ; continue; }
     if(hasDepth){ const t=Math.max(0,Math.min(1, DEPTH[i]/maxDepth));      // white -> deep blue
@@ -633,6 +651,7 @@ function updateHash(){
   p.set('dist', numval('distNum')); p.set('depth', numval('depthNum')); p.set('run', numval('runNum'));
   if(el('docks').checked) p.set('docks','1');
   if(NOWAKE && !el('nowake').checked) p.set('nw','0');
+  if(el('bands').checked) p.set('bands','1');
   history.replaceState(null,'','#'+p.toString());
 }
 function readHash(){
@@ -640,7 +659,7 @@ function readHash(){
   return p.has('lake') ? {
     lake:p.get('lake'),
     dist:p.get('dist'), depth:p.get('depth'), run:p.get('run'), docks:p.get('docks')==='1',
-    nw:p.get('nw')
+    nw:p.get('nw'), bands:p.get('bands')==='1'
   } : null;
 }
 function flash(msg){ el('sharemsg').textContent=msg; setTimeout(()=>{ if(el('sharemsg').textContent===msg) el('sharemsg').textContent=''; }, 2500); }
@@ -672,6 +691,9 @@ function cornerLonLat(c,r){ const b=LAKE.bounds_lonlat, u=c/LAKE.width, v=r/LAKE
            +lerp(lerp(b.nw[1],b.ne[1],u), lerp(b.sw[1],b.se[1],u), v).toFixed(6) ]; }
 function critLabel(){
   const d=numval('distNum'), z=numval('depthNum'), r=numval('runNum');
+  if(el('bands').checked)
+    return `${LAKE.name} · all rule bands from ${el('docks').checked?'shore/dock':'shore'}`
+      + (NOWAKE&&el('nowake').checked?' · no-wake zones applied':'');
   return `${LAKE.name} · ≥${d} ft from ${el('docks').checked?'shore/dock':'shore'}`
     + (LAKE.has_depth&&z>0?` · ≥${z} ft deep`:'') + (r>0?` · run ≥${r} ft`:'')
     + (NOWAKE&&el('nowake').checked?' · no-wake zones applied':'');
@@ -726,20 +748,54 @@ function boundaryRings(m){
   return rings;
 }
 function xmlEsc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
-function exportKml(){
-  const m=RUNS||QUAL; if(!m){ flash('nothing to export'); return; }
+function kmlString(){
+  const m=RUNS||QUAL; if(!m) return null;
   const rings=boundaryRings(m);
-  if(!rings.length){ flash('nothing qualifies — nothing to export'); return; }
+  if(!rings.length) return null;
   const lines=rings.map(r=>'<LineString><tessellate>1</tessellate><coordinates>'
       + r.map(p=>p[0]+','+p[1]+',0').join(' ') + '</coordinates></LineString>').join('');
-  const kml='<?xml version="1.0" encoding="UTF-8"?>'
+  return '<?xml version="1.0" encoding="UTF-8"?>'
     +'<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
     +`<name>${xmlEsc(LAKE.name)} zones</name>`
     +'<Style id="z"><LineStyle><color>ff3f43c5</color><width>3</width></LineStyle></Style>'
     +`<Placemark><name>${xmlEsc(critLabel())}</name><styleUrl>#z</styleUrl>`
     +`<MultiGeometry>${lines}</MultiGeometry></Placemark></Document></kml>`;
-  download(new Blob([kml],{type:'application/vnd.google-earth.kml+xml'}), `${LAKE.slug}_zones.kml`);
+}
+function exportKml(){
+  const k=kmlString(); if(!k){ flash('nothing qualifies — nothing to export'); return; }
+  download(new Blob([k],{type:'application/vnd.google-earth.kml+xml'}), `${LAKE.slug}_zones.kml`);
   flash('KML saved — open in Google Earth or import to My Maps');
+}
+// minimal single-entry ZIP (stored, no compression) — a KMZ is doc.kml zipped
+function crc32(buf){
+  let t=crc32.t;
+  if(!t){ t=crc32.t=new Int32Array(256);
+    for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c; } }
+  let c=-1; for(let i=0;i<buf.length;i++) c=t[(c^buf[i])&255]^(c>>>8);
+  return (c^-1)>>>0;
+}
+function makeZip(name, data){
+  const nameB=new TextEncoder().encode(name), n=data.length, crc=crc32(data);
+  const lf=new Uint8Array(30+nameB.length), l=new DataView(lf.buffer);
+  l.setUint32(0,0x04034b50,true); l.setUint16(4,20,true); l.setUint16(8,0,true);
+  l.setUint32(14,crc,true); l.setUint32(18,n,true); l.setUint32(22,n,true);
+  l.setUint16(26,nameB.length,true); lf.set(nameB,30);
+  const cd=new Uint8Array(46+nameB.length), c=new DataView(cd.buffer);
+  c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true);
+  c.setUint32(16,crc,true); c.setUint32(20,n,true); c.setUint32(24,n,true);
+  c.setUint16(28,nameB.length,true); c.setUint32(42,0,true); cd.set(nameB,46);
+  const eo=new Uint8Array(22), e=new DataView(eo.buffer);
+  e.setUint32(0,0x06054b50,true); e.setUint16(8,1,true); e.setUint16(10,1,true);
+  e.setUint32(12,cd.length,true); e.setUint32(16,lf.length+n,true);
+  const out=new Uint8Array(lf.length+n+cd.length+eo.length);
+  out.set(lf,0); out.set(data,lf.length); out.set(cd,lf.length+n); out.set(eo,lf.length+n+cd.length);
+  return out;
+}
+function exportKmz(){
+  const k=kmlString(); if(!k){ flash('nothing qualifies — nothing to export'); return; }
+  const zip=makeZip('doc.kml', new TextEncoder().encode(k));
+  download(new Blob([zip],{type:'application/vnd.google-earth.kmz'}), `${LAKE.slug}_zones.kmz`);
+  flash('KMZ saved — opens in Google Earth on your phone');
 }
 function exportGpx(){
   const m=RUNS||QUAL; if(!m){ flash('nothing to export'); return; }
@@ -1077,12 +1133,14 @@ function buildRules(){
 }
 function buildLegend(){
   const dockOn = !!DIST_DOCKS || !!(MANUAL && MANUAL.length);
-  el('legend').innerHTML =
-    (LAKE.has_depth ? sw('#0c3760','deep') : sw('#0a6e78','far from shore')) +
-    sw('#c8860a','qualifying') + sw('#c5433f','straight run') +
-    (NOWAKE && el('nowake').checked ? sw('#781a2e','designated no-wake') : '') +
+  const common = (NOWAKE && el('nowake').checked ? sw('#781a2e','designated no-wake') : '') +
     (CAUTION ? sw('#e6be28','caution') : '') +
     (dockOn ? `<span><span class="sw dot" style="background:${MANUAL?'#2eceff':'#ff3c3c'}"></span>dock${MANUAL?' (edited)':''}</span>` : '');
+  el('legend').innerHTML = el('bands').checked
+    ? sw('#d24646','no wake (100)') + sw('#eb9632','no tow (150)') + sw('#f0d660','tow OK') +
+      sw('#7c52cd','WSIA surf (200+)') + sw('#3ac7de','room to pass (300+)') + common
+    : (LAKE.has_depth ? sw('#0c3760','deep') : sw('#0a6e78','far from shore')) +
+      sw('#c8860a','qualifying') + sw('#c5433f','straight run') + common;
 }
 function sw(color,label){ return `<span><span class="sw" style="background:${color}"></span>${label}</span>`; }
 
@@ -1104,6 +1162,7 @@ async function init(){
   });
   el('docks').addEventListener('change', compute);
   el('nowake').addEventListener('change', ()=>{ buildLegend(); compute(); });
+  el('bands').addEventListener('change', ()=>{ buildLegend(); paint(QUAL,RUNS); updateHash(); });
   document.querySelectorAll('button.preset').forEach(b=> b.onclick=()=>{
     setPair('dist','distNum',+b.dataset.d); setPair('depth','depthNum',+b.dataset.z);
     setPair('run','runNum',+b.dataset.r);
@@ -1117,7 +1176,7 @@ async function init(){
     compute();
   });
   el('copyLink').onclick=copyLink; el('dlPng').onclick=exportPng; el('dlGeo').onclick=exportGeoJson;
-  el('dlKml').onclick=exportKml; el('dlGpx').onclick=exportGpx;
+  el('dlKml').onclick=exportKml; el('dlKmz').onclick=exportKmz; el('dlGpx').onclick=exportGpx;
   document.querySelectorAll('.tab').forEach(b=> b.onclick=()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on', x===b));
     document.querySelectorAll('.tabsec').forEach(s=>{ s.hidden = s.id!==b.dataset.tab; });
@@ -1152,6 +1211,7 @@ async function init(){
     setPair('run','runNum', +st.run||0);
     if(st.docks && !el('docks').disabled) el('docks').checked=true;
     if(st.nw==='0' && NOWAKE) el('nowake').checked=false;
+    if(st.bands){ el('bands').checked=true; buildLegend(); }
     compute();
   }
 }
